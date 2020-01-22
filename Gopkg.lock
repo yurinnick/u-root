@@ -37,6 +37,18 @@
   version = "v0.2.0"
 
 [[projects]]
+  digest = "1:90f59f03e8a0c973faff6d6122a4000efaee118907b5c695cc7615d2d8240538"
+  name = "github.com/boombuler/barcode"
+  packages = [
+    ".",
+    "qr",
+    "utils",
+  ]
+  pruneopts = "NUT"
+  revision = "3cfea5ab600ae37946be2b763b8ec2c1cf2d272d"
+  version = "v1.0.0"
+
+[[projects]]
   digest = "1:82b27017fd8d5f4246c11f9f381325b3638007d2ca554e17d079e23ddd855fb6"
   name = "github.com/cenkalti/backoff"
   packages = ["."]
@@ -61,12 +73,28 @@
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:4c6020db342c823428a2bdf39c50d2ff1de2bc74c722eb55cff5dee459e6d6c5"
+  name = "github.com/disintegration/imaging"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "acabd8315e63bfcaac97d52d68a7a0b88d2eea93"
+  version = "v1.6.2"
+
+[[projects]]
   digest = "1:b7ffca49e9cfd3dfb04a8e0a59347708c6f78f68476a32c5e0a0edca5d1b258c"
   name = "github.com/dustin/go-humanize"
   packages = ["."]
   pruneopts = "NUT"
   revision = "9f541cc9db5d55bce703bd99987c9d5cb8eea45e"
   version = "v1.0.0"
+
+[[projects]]
+  digest = "1:85f32b7ea46a962ccdeead5612f2c75be623133d78225b40f81b207478bb4a46"
+  name = "github.com/eliukblau/pixterm"
+  packages = ["pkg/ansimage"]
+  pruneopts = "NUT"
+  revision = "80d60b29ba1c381489f27c6c718c5693bd5a3223"
+  version = "v1.3.1"
 
 [[projects]]
   digest = "1:e8301df5b11c8c13927a26a88ee7ec65410024f75c0fc3c8e6421aa6833808ac"
@@ -211,6 +239,14 @@
   version = "v1.1.8"
 
 [[projects]]
+  digest = "1:46cd411094ae22c75cfd0e99a9865906006f97267686df2162b62067acbfd4d5"
+  name = "github.com/lucasb-eyer/go-colorful"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "fadcb7c7fa1e47844a23f5ebea95219172166a56"
+  version = "v1.0.3"
+
+[[projects]]
   digest = "1:4c2c63bfd4c2ae0c5a9d7f75cab1f4fac4e8c2ce58f52a73322cefc9bdb4c5bd"
   name = "github.com/mattn/go-isatty"
   packages = ["."]
@@ -262,6 +298,18 @@
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:7925d130987f891210796f4318d661db7e7b3f26c314f3deec1fe346799afa7b"
+  name = "github.com/pquerna/otp"
+  packages = [
+    ".",
+    "hotp",
+    "totp",
+  ]
+  pruneopts = "NUT"
+  revision = "43bebefda392017900e7a7b237b4c914c6a55b50"
+  version = "v1.2.0"
+
+[[projects]]
   branch = "master"
   digest = "1:546bfb3441e8385de822b70fdd3d43ea829ab8a9b1d2aaaf0b61f65a99b43531"
   name = "github.com/rck/unit"
@@ -303,6 +351,14 @@
   pruneopts = "NUT"
   revision = "3ebf1ddaeb260c4b1ae502a01c7844fa8c1fa0e9"
   version = "v1.5.1"
+
+[[projects]]
+  branch = "master"
+  digest = "1:50ce9b95a0a92275b8d9d38a2977394b9d27ef67a375b1ba0ca1d2f1603ab893"
+  name = "github.com/u-root/tpmtotp"
+  packages = ["pkg/token"]
+  pruneopts = "NUT"
+  revision = "f7a70d4b009be3953e5ac3c71d6e3fd9ef1a3309"
 
 [[projects]]
   branch = "master"
@@ -359,6 +415,23 @@
   ]
   pruneopts = "NUT"
   revision = "06a226fb4e3765ef3f48aa2852b401bc7b98e981"
+
+[[projects]]
+  branch = "master"
+  digest = "1:32cb3abea169eafb46df6a3190e19fcacb32c1a225c04b4c14b3ce199fde0990"
+  name = "golang.org/x/image"
+  packages = [
+    "bmp",
+    "ccitt",
+    "riff",
+    "tiff",
+    "tiff/lzw",
+    "vp8",
+    "vp8l",
+    "webp",
+  ]
+  pruneopts = "NUT"
+  revision = "33d19683fad8d833d2299173c7bf8ced0f102764"
 
 [[projects]]
   digest = "1:467bb8fb8fa786448b8d486cd0bb7c1a5577dcd7310441aa02a20110cd9f727d"
@@ -551,6 +624,7 @@
     "github.com/safchain/ethtool",
     "github.com/spf13/pflag",
     "github.com/stretchr/testify/require",
+    "github.com/u-root/tpmtotp/pkg/token",
     "github.com/vishvananda/netlink",
     "github.com/vtolstov/go-ioctl",
     "golang.org/x/crypto/ed25519",

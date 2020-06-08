@@ -246,6 +246,14 @@
   revision = "50f2db8cc0658568575938a39dbaa46172921d98"
 
 [[projects]]
+  branch = "master"
+  digest = "1:f3988932b1a86b49b22ddfeaeef5ae9e725a41781a2246a9844cb2e30736591a"
+  name = "github.com/orangecms/go-framebuffer"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "eb27147964e22596b0bddafb10f7b592b06bdbcf"
+
+[[projects]]
   digest = "1:0028cb19b2e4c3112225cd871870f2d9cf49b9b4276531f03438a88e94be86fe"
   name = "github.com/pmezard/go-difflib"
   packages = ["difflib"]
@@ -537,6 +545,7 @@
     "github.com/klauspost/pgzip",
     "github.com/kr/pty",
     "github.com/mattn/go-isatty",
+    "github.com/orangecms/go-framebuffer",
     "github.com/rck/unit",
     "github.com/rekby/gpt",
     "github.com/safchain/ethtool",

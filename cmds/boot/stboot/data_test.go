@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSearchBootballFiles(t *testing.T) {
-	dir := "testdata/datapartition/bootballs"
-	ret, err := searchBootballFiles(dir)
+func TestSearchOSPackageFiles(t *testing.T) {
+	dir := "testdata/datapartition/os_pkgs"
+	ret, err := searchOSPackageFiles(dir)
 	t.Log(ret)
 	require.NotEmpty(t, ret)
 	require.NoError(t, err)

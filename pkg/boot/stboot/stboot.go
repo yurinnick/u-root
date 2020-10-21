@@ -10,17 +10,17 @@ import (
 )
 
 const (
-	// BootballExt is the file extension of bootballs
-	BootballExt string = ".stboot"
-	// DefaultBallName is the file name of the archive, which is expected to contain
+	// OSPackageExt is the file extension of OS packages
+	OSPackageExt string = ".zip"
+	// DefaultOSPackageName is the file name of the archive, which is expected to contain
 	// the stboot configuration file along with the corresponding files
-	DefaultBallName string = "ball.stboot"
+	DefaultOSPackageName string = "ospkg.zip"
 	// ConfigName is the name of the stboot configuration file
 	ConfigName string = "stconfig.json"
 )
 
-// ComposeIndividualBallPrefix returns a host specific name prefix for bootball files.
-func ComposeIndividualBallPrefix(hwAddr net.HardwareAddr) string {
+// ComposeIndividualOSPackagePrefix returns a host specific name prefix for OS package files.
+func ComposeIndividualOSPackagePrefix(hwAddr net.HardwareAddr) string {
 	prefix := hwAddr.String()
 	prefix = strings.ReplaceAll(prefix, ":", "-")
 	return prefix + "-"

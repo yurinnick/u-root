@@ -44,10 +44,10 @@ const (
 	httpsRootsFile         = "stboot/etc/https-root-certificates.pem"
 	ntpServerFile          = "stboot/etc/ntp-servers.json"
 
-	newDir              = "stboot/bootballs/new/"
-	knownGoodDir        = "stboot/bootballs/known_good/"
-	invalidDir          = "stboot/bootballs/invalid/"
-	currentBootballFile = "stboot/bootballs/current-ball.stboot"
+	newDir           = "stboot/os_pkgs/new/"
+	knownGoodDir     = "stboot/os_pkgs/known_good/"
+	invalidDir       = "stboot/os_pkgs/invalid/"
+	currentOSPkgFile = "stboot/os_pkgs/current-ospkg.zip"
 )
 
 var banner = `
@@ -150,76 +150,76 @@ func main() {
 	info("TXT is supported on this platform")
 
 	////////////////
-	// Load bootball
+	// Load OS package
 	////////////////
 
-	var bootballFiles []string
+	var ospkgFiles []string
 
 	switch vars.BootMode {
 	case NetworkStatic, NetworkDHCP:
-		f, err := loadBallFromNetwork()
+		f, err := loadOSPackageFromNetwork()
 		if err != nil {
-			reboot("error loading bootball: %v", err)
+			reboot("error loading OS package: %v", err)
 		}
-		bootballFiles = append(bootballFiles, f)
+		ospkgFiles = append(ospkgFiles, f)
 	case LocalStorage:
-		ff, err := loadBallFromLocalStorage()
+		ff, err := loadOSPackageFromLocalStorage()
 		if err != nil {
-			reboot("error loading bootball: %v", err)
+			reboot("error loading OS package: %v", err)
 		}
-		bootballFiles = append(bootballFiles, ff...)
+		ospkgFiles = append(ospkgFiles, ff...)
 	default:
 		reboot("unknown boot mode: %s", vars.BootMode.string())
 	}
-	if len(bootballFiles) == 0 {
-		reboot("No bootballs found")
+	if len(ospkgFiles) == 0 {
+		reboot("No OS packages found")
 	}
 	if *doDebug {
-		info("Bootballs to be processed:")
-		for _, b := range bootballFiles {
+		info("OS packages to be processed:")
+		for _, b := range ospkgFiles {
 			info(b)
 		}
 	}
 
-	////////////////////
-	// Process bootballs
-	////////////////////
+	//////////////////////
+	// Process OS packages
+	//////////////////////
 	var osi boot.OSImage
-	for _, path := range bootballFiles {
-		info("Opening bootball %s", path)
-		ball, err := stboot.BootballFromArchive(path)
+	for _, path := range ospkgFiles {
+		info("Opening OS package %s", path)
+		ospkg, err := stboot.OSPackageFromArchive(path)
 		if err != nil {
 			debug("%v", err)
 			markInvalid(path)
 			continue
 		}
 
-		////////////////////////////////////////
-		// Validate bootball's root certificates
-		////////////////////////////////////////
-		fp := calculateFingerprint(ball.RootCertPEM)
-		info("Fingerprint of boot ball's root certificate:")
+		//////////////////////////////////////////
+		// Validate OS package's root certificates
+		//////////////////////////////////////////
+		fp := calculateFingerprint(ospkg.RootCertPEM)
+		info("Fingerprint of OS package's root certificate:")
 		info(fp)
 		if !fingerprintIsValid(fp, vars.Fingerprints) {
-			debug("Root certificate of boot ball does not match expacted fingerprint")
+			debug("Root certificate of OS package does not match expacted fingerprint")
 			markInvalid(path)
 			continue
 		}
 		info("OK!")
 
-		//////////////////
-		// Verify bootball
-		//////////////////
+		////////////////////
+		// Verify OS package
+		////////////////////
 		if *doDebug {
-			str, _ := json.MarshalIndent(ball.Config, "", "  ")
-			info("Bootball config: %s", str)
+			str, _ := json.MarshalIndent(ospkg.Config, "", "  ")
+			info("OS package config: %s", str)
 		} else {
-			info("Label: %s", ball.Config.Label)
+			info("Label: %s", ospkg.Config.Label)
 		}
 
-		n, valid, err := ball.Verify()
+		n, valid, err := ospkg.Verify()
 		if err != nil {
-			debug("Error verifying bootball: %v", err)
+			debug("Error verifying OS package: %v", err)
 			markInvalid(path)
 			continue
 		}
@@ -230,13 +230,13 @@ func main() {
 		}
 
 		debug("Signatures: %d found, %d valid, %d required", n, valid, vars.MinimalSignaturesMatch)
-		info("Bootball passed verification")
+		info("OS package passed verification")
 		info(check)
 
 		/////////////
 		// Extract OS
 		/////////////
-		osi, err = extractOS(ball)
+		osi, err = extractOS(ospkg)
 		if err != nil {
 			debug("%v", err)
 			markInvalid(path)
@@ -245,10 +245,10 @@ func main() {
 
 		markCurrent(path)
 		break
-	} // end process-bootballs-loop
+	} // end process-os-pkgs-loop
 
 	if osi == nil {
-		reboot("No usable bootball")
+		reboot("No usable OS package")
 	}
 
 	info("Operating system: %s", osi.Label())
@@ -290,15 +290,15 @@ func main() {
 
 }
 
-func extractOS(ball *stboot.Bootball) (boot.OSImage, error) {
+func extractOS(ospkg *stboot.OSPackage) (boot.OSImage, error) {
 	debug("Looking for operating system with TXT")
 	txt := true
-	osiTXT, err := ball.OSImage(txt)
+	osiTXT, err := ospkg.OSImage(txt)
 	if err != nil {
 		debug("%v", err)
 	}
 	debug("Looking for non-TXT fallback operating system")
-	osiFallback, err := ball.OSImage(!txt)
+	osiFallback, err := ospkg.OSImage(!txt)
 	if err != nil {
 		debug("%v", err)
 	}
@@ -314,7 +314,7 @@ func extractOS(ball *stboot.Bootball) (boot.OSImage, error) {
 		info("Choosing operating system with TXT")
 		return osiTXT, nil
 	case osiTXT != nil && osiFallback == nil && !txtSupportedByHost:
-		return nil, fmt.Errorf("TXT not supported by host, no fallback OS provided by bootball")
+		return nil, fmt.Errorf("TXT not supported by host, no fallback OS provided by OS package")
 	case osiTXT == nil && osiFallback != nil && txtSupportedByHost:
 		info("Choosing non-TXT fallback operating system")
 		return osiFallback, nil
@@ -322,7 +322,7 @@ func extractOS(ball *stboot.Bootball) (boot.OSImage, error) {
 		info("Choosing non-TXT fallback operating system")
 		return osiFallback, nil
 	case osiTXT == nil && osiFallback == nil:
-		return nil, fmt.Errorf("No operating system found in bootball")
+		return nil, fmt.Errorf("No operating system found in OS package")
 	default:
 		return nil, fmt.Errorf("Unexpected error while extracting OS")
 	}
@@ -330,32 +330,32 @@ func extractOS(ball *stboot.Bootball) (boot.OSImage, error) {
 
 func markInvalid(file string) {
 	if vars.BootMode == LocalStorage {
-		// move invalid bootball to special directory
+		// move invalid OS package to special directory
 		invalid := filepath.Join(dataMountPoint, invalidDir, filepath.Base(file))
 		if err := stboot.CreateAndCopy(file, invalid); err != nil {
-			reboot("failed to move invalid bootball: %v", err)
+			reboot("failed to move invalid OS package: %v", err)
 		}
 		if err := os.Remove(file); err != nil {
-			reboot("failed to move invalid bootball: %v", err)
+			reboot("failed to move invalid OS package: %v", err)
 		}
 	}
 }
 
 func markCurrent(file string) {
 	if vars.BootMode == LocalStorage {
-		// move current bootball to special file
-		f := filepath.Join(dataMountPoint, currentBootballFile)
+		// move current OS package to special file
+		f := filepath.Join(dataMountPoint, currentOSPkgFile)
 		rel, err := filepath.Rel(filepath.Dir(f), file)
 		if err != nil {
-			reboot("failed to indicate current bootball: %v", err)
+			reboot("failed to indicate current OS package: %v", err)
 		}
 		if err = ioutil.WriteFile(f, []byte(rel), os.ModePerm); err != nil {
-			reboot("failed to indicate current bootball: %v", err)
+			reboot("failed to indicate current OS package: %v", err)
 		}
 	}
 }
 
-func loadBallFromNetwork() (string, error) {
+func loadOSPackageFromNetwork() (string, error) {
 	p := filepath.Join(dataMountPoint, provisioningServerFile)
 	bytes, err := ioutil.ReadFile(p)
 	if err != nil {
@@ -369,60 +369,60 @@ func loadBallFromNetwork() (string, error) {
 		return "", fmt.Errorf("provisioning server URLs: %v", err)
 	}
 
-	info("Try downloading individual bootball")
+	info("Try downloading individual OS package")
 	hwAddr, err := hostHWAddr()
 	if err != nil {
 		return "", fmt.Errorf("cannot evaluate hardware address: %v", err)
 	}
 	info("Host's HW address: %s", hwAddr.String())
-	prefix := stboot.ComposeIndividualBallPrefix(hwAddr)
-	file := prefix + stboot.DefaultBallName
+	prefix := stboot.ComposeIndividualOSPackagePrefix(hwAddr)
+	file := prefix + stboot.DefaultOSPackageName
 	dest, err := tryDownload(urlStrings, file)
 	if err != nil {
 		debug("%v", err)
-		info("Try downloading general bootball")
-		dest, err = tryDownload(urlStrings, stboot.DefaultBallName)
+		info("Try downloading general OS package")
+		dest, err = tryDownload(urlStrings, stboot.DefaultOSPackageName)
 		if err != nil {
 			debug("%v", err)
-			return "", fmt.Errorf("cannot get appropriate bootball from provisioning servers")
+			return "", fmt.Errorf("cannot get appropriate OS package from provisioning servers")
 		}
 	}
 
 	return dest, nil
 }
 
-func loadBallFromLocalStorage() ([]string, error) {
-	var bootballs []string
-	var newBootballs []string
-	var knownGoodBootballs []string
+func loadOSPackageFromLocalStorage() ([]string, error) {
+	var ospkgs []string
+	var newPkgs []string
+	var knownGoodPkgs []string
 
-	//new Bootballs
+	//new OS packages
 	dir := filepath.Join(dataMountPoint, newDir)
-	newBootballs, err := searchBootballFiles(dir)
+	newPkgs, err := searchOSPackageFiles(dir)
 	if err != nil {
 		return nil, err
 	}
-	bootballs = append(bootballs, newBootballs...)
+	ospkgs = append(ospkgs, newPkgs...)
 
-	// known good bootballs
+	// known good OS packages
 	dir = filepath.Join(dataMountPoint, knownGoodDir)
-	knownGoodBootballs, err = searchBootballFiles(dir)
+	knownGoodPkgs, err = searchOSPackageFiles(dir)
 	if err != nil {
 		return nil, err
 	}
-	bootballs = append(bootballs, knownGoodBootballs...)
-	return bootballs, nil
+	ospkgs = append(ospkgs, knownGoodPkgs...)
+	return ospkgs, nil
 }
 
-func searchBootballFiles(dir string) ([]string, error) {
+func searchOSPackageFiles(dir string) ([]string, error) {
 	var ret []string
 	fis, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	for _, fi := range fis {
-		// take *.stboot files only
-		if filepath.Ext(fi.Name()) == ".stboot" {
+		// take *.zip files only
+		if filepath.Ext(fi.Name()) == ".zip" {
 			b := filepath.Join(dir, fi.Name())
 			ret = append(ret, b)
 		}

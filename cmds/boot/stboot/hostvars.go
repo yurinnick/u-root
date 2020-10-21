@@ -15,7 +15,7 @@ const hostvarsFile = "hostvars.json"
 //go:generate jsonenums -type=bootmode
 type bootmode int
 
-// bootmodes values defines where to load a bootball from.
+// bootmodes values defines where to load a OS package from.
 const (
 	NetworkStatic bootmode = iota
 	NetworkDHCP
@@ -30,7 +30,7 @@ func (b bootmode) string() string {
 type Hostvars struct {
 	// MinimalSignaturesMatch is the min number of signatures that must pass validation.
 	MinimalSignaturesMatch int `json:"minimal_signatures_match"`
-	// Fingerprints are used to validate the root certificate insinde the bootball.
+	// Fingerprints are used to validate the root certificate insinde the OS package.
 	Fingerprints []string `json:"fingerprints"`
 	// Timestamp is the UNIX build time of the bootloader
 	Timestamp int `json:"build_timestamp"`

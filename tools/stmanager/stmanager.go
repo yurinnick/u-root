@@ -23,15 +23,15 @@ const (
 	// Author is the author
 	Author = "Jens Drenhaus"
 	// HelpText is the command line help
-	HelpText = "stmanager can be used for managing System Transparency bootballs"
+	HelpText = "stmanager can be used for managing System Transparency OS packages"
 )
 
 var goversion string
 
 var (
-	create            = kingpin.Command("create", "Create a bootball from the provided operating system files")
-	createOut         = create.Flag("out", "Output directory of the bootball. Defaults to current directory").ExistingDir()
-	createLabel       = create.Flag("label", "Name of the boot configuration. Defaults to 'System Tarnsparency Bootball <kernel>'").String()
+	create            = kingpin.Command("create", "Create a OS package from the provided operating system files")
+	createOut         = create.Flag("out", "Output directory of the OS package. Defaults to current directory").ExistingDir()
+	createLabel       = create.Flag("label", "Name of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
 	createKernel      = create.Flag("kernel", "Operation system kernel").Required().ExistingFile()
 	createInitramfs   = create.Flag("initramfs", "Operation system initramfs").ExistingFile()
 	createCmdline     = create.Flag("cmd", "Kernel command line").String()
@@ -40,15 +40,15 @@ var (
 	createRootCert    = create.Flag("cert", "Root certificate of certificates used for signing").Required().ExistingFile()
 	createACM         = create.Flag("acm", "Authenticated Code Module for TXT. This can be a path to single ACM or directory containig multiple ACMs.").ExistingFileOrDir()
 	createAllowNonTXT = create.Flag("unsave", "Allow booting without TXT").Bool()
-	createHWAddr      = create.Flag("mac", "Hardware address of the host if the created bootball needs to be individual for a specific host.").String()
+	createHWAddr      = create.Flag("mac", "Hardware address of the host if the created OS package needs to be individual for a specific host.").String()
 
-	sign            = kingpin.Command("sign", "Sign the binary inside the provided bootball")
+	sign            = kingpin.Command("sign", "Sign the binary inside the provided OS package")
 	signPrivKeyFile = sign.Flag("key", "Private key for signing").Required().ExistingFile()
 	signCertFile    = sign.Flag("cert", "Certificate corresponding to the private key").Required().ExistingFile()
-	signBootball    = sign.Arg("bootball", "Archive created by 'stconfig create'").Required().ExistingFile()
+	signOSPackage   = sign.Arg("OS package", "Archive created by 'stconfig create'").Required().ExistingFile()
 
-	unpack         = kingpin.Command("unpack", "Unpack boot ball  file into directory")
-	unpackBootball = unpack.Arg("bootball", "Archive containing the boot files").Required().ExistingFile()
+	show          = kingpin.Command("sho", "Unpack OS package  file into directory")
+	showOSPackage = show.Arg("OS package", "Archive containing the boot files").Required().ExistingFile()
 )
 
 func main() {
@@ -63,7 +63,7 @@ func main() {
 			label = *createLabel
 		} else {
 			k := filepath.Base(*createKernel)
-			label = fmt.Sprintf("System Tarnsparency Bootball %s", k)
+			label = fmt.Sprintf("System Tarnsparency OSPackage %s", k)
 		}
 		var acms []string
 		if *createACM != "" {
@@ -89,15 +89,15 @@ func main() {
 				acms = append(acms, *createACM)
 			}
 		}
-		if err := packBootBall(*createOut, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, *createRootCert, acms, *createAllowNonTXT, *createHWAddr); err != nil {
+		if err := packOSPackage(*createOut, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, *createRootCert, acms, *createAllowNonTXT, *createHWAddr); err != nil {
 			log.Fatalln(err.Error())
 		}
 	case sign.FullCommand():
-		if err := addSignatureToBootBall(*signBootball, *signPrivKeyFile, *signCertFile); err != nil {
+		if err := addSignatureToOSPackage(*signOSPackage, *signPrivKeyFile, *signCertFile); err != nil {
 			log.Fatalln(err.Error())
 		}
-	case unpack.FullCommand():
-		if err := unpackBootBall(*unpackBootball); err != nil {
+	case show.FullCommand():
+		if err := unpackOSPackage(*showOSPackage); err != nil {
 			log.Fatalln(err.Error())
 		}
 	default:

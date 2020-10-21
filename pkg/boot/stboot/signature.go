@@ -59,7 +59,7 @@ func (s *Signature) Write(dir string) error {
 	return ioutil.WriteFile(certPath, certBuf.Bytes(), os.ModePerm)
 }
 
-// Signer is used by BootBall to hash, sign and varify the Bootball.
+// Signer is used by OSPackage to hash, sign and varify the OSPackage.
 type Signer interface {
 	Hash(files ...string) ([]byte, error)
 	Sign(privKey string, data []byte) ([]byte, error)

@@ -13,65 +13,65 @@ import (
 	"github.com/u-root/u-root/pkg/boot/stboot"
 )
 
-func packBootBall(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool, mac string) error {
+func packOSPackage(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool, mac string) error {
 	var individual string
 	if mac != "" {
 		hwAddr, err := net.ParseMAC(mac)
 		if err != nil {
 			return err
 		}
-		individual = stboot.ComposeIndividualBallPrefix(hwAddr)
+		individual = stboot.ComposeIndividualOSPackagePrefix(hwAddr)
 	}
 
-	ball, err := stboot.InitBootball(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert, acms, allowNonTXT)
+	ospkg, err := stboot.InitOSPackage(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert, acms, allowNonTXT)
 	if err != nil {
 		return err
 	}
 
 	if individual != "" {
-		name := filepath.Base(ball.Archive)
+		name := filepath.Base(ospkg.Archive)
 		name = individual + name
-		ball.Archive = filepath.Join(filepath.Dir(ball.Archive), name)
+		ospkg.Archive = filepath.Join(filepath.Dir(ospkg.Archive), name)
 	}
 
-	err = ball.Pack()
+	err = ospkg.Pack()
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(filepath.Base(ball.Archive))
-	return ball.Clean()
+	fmt.Println(filepath.Base(ospkg.Archive))
+	return ospkg.Clean()
 
 }
 
-func addSignatureToBootBall(bootBall, privKey, cert string) error {
-	ball, err := stboot.BootballFromArchive(bootBall)
+func addSignatureToOSPackage(osPackage, privKey, cert string) error {
+	ospkg, err := stboot.OSPackageFromArchive(osPackage)
 	if err != nil {
 		return err
 	}
 
-	log.Print("Signing bootball ...")
+	log.Print("Signing OS package ...")
 	log.Printf("private key: %s", privKey)
 	log.Printf("certificate: %s", cert)
-	err = ball.Sign(privKey, cert)
+	err = ospkg.Sign(privKey, cert)
 	if err != nil {
 		return err
 	}
 
-	if err = ball.Pack(); err != nil {
+	if err = ospkg.Pack(); err != nil {
 		return err
 	}
 
-	log.Printf("Signatures included: %d", ball.NumSignatures)
-	return ball.Clean()
+	log.Printf("Signatures included: %d", ospkg.NumSignatures)
+	return ospkg.Clean()
 }
 
-func unpackBootBall(bootBall string) error {
-	ball, err := stboot.BootballFromArchive(bootBall)
+func unpackOSPackage(ospkgPath string) error {
+	ospkg, err := stboot.OSPackageFromArchive(ospkgPath)
 	if err != nil {
 		return err
 	}
 
-	log.Println("Archive unpacked into: " + ball.Dir)
+	log.Println("Archive unpacked into: " + ospkg.Dir)
 	return nil
 }

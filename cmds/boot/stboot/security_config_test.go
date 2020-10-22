@@ -10,13 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadHostvars(t *testing.T) {
-	h, err := loadHostvars("testdata/hostvars.json")
+func TestLoadSecurityConf(t *testing.T) {
+	h, err := loadSecurityConfig("testdata/security_configuration.json")
 	require.NoError(t, err)
 	require.Equal(t, LocalStorage, h.BootMode)
 }
 
-func TestLoadHostvarsInvalid(t *testing.T) {
-	_, err := loadHostvars("testdata/hostvars_invalid.json")
+func TestLoadSecurityConfigInvalid(t *testing.T) {
+	_, err := loadSecurityConfig("testdata/security_configuration_invalid.json")
 	require.Error(t, err)
 }

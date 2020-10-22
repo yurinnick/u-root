@@ -67,7 +67,7 @@ func validateSystemTime(builtTime time.Time, useNetwork bool) error {
 			}
 		} else {
 			info("Configured not to use network to update time")
-			info("Set system time to timestamp of hostvars.json")
+			info("Set system time to timestamp of security_configuration.json")
 			info("WARNING: System time will not be up to date!")
 			newTime = builtTime
 		}

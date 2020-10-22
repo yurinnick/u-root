@@ -10,7 +10,7 @@ import (
 	"io/ioutil"
 )
 
-const hostvarsFile = "hostvars.json"
+const securityConfigFile = "security_configuration.json"
 
 //go:generate jsonenums -type=bootmode
 type bootmode int
@@ -26,8 +26,8 @@ func (b bootmode) string() string {
 	return []string{"NetworkStatic", "NetworkDHCP", "LocalStorage"}[b]
 }
 
-// Hostvars contains platform-specific data.
-type Hostvars struct {
+// SecurityConfig contains platform-specific data.
+type SecurityConfig struct {
 	// MinimalSignaturesMatch is the min number of signatures that must pass validation.
 	MinimalSignaturesMatch int `json:"minimal_signatures_match"`
 	// Fingerprints are used to validate the root certificate insinde the OS package.
@@ -38,16 +38,16 @@ type Hostvars struct {
 	BootMode bootmode `json:"boot_mode"`
 }
 
-// loadHostVars parses hostvars.json file.
+// loadSecurityConfig parses security_configuration.json file.
 // It is expected to be in /etc.
-func loadHostvars(path string) (*Hostvars, error) {
-	var vars Hostvars
+func loadSecurityConfig(path string) (*SecurityConfig, error) {
+	var sc SecurityConfig
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read file %s due to: %v", path, err)
 	}
-	if err = json.Unmarshal(data, &vars); err != nil {
-		return nil, fmt.Errorf("cannot parse data - invalid hostvars in %s:  %v", path, err)
+	if err = json.Unmarshal(data, &sc); err != nil {
+		return nil, fmt.Errorf("cannot parse data - invalid security configuration in %s:  %v", path, err)
 	}
-	return &vars, nil
+	return &sc, nil
 }

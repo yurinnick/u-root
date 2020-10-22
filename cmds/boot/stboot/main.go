@@ -33,7 +33,7 @@ var (
 
 	debug = func(string, ...interface{}) {}
 
-	vars               *Hostvars
+	sc                 *SecurityConfig
 	txtSupportedByHost bool
 )
 
@@ -85,21 +85,21 @@ func main() {
 
 	info(banner)
 
-	/////////////////
-	// Hostvars
-	/////////////////
-	p := filepath.Join("etc/", hostvarsFile)
+	/////////////////////////
+	// Security configuration
+	/////////////////////////
+	p := filepath.Join("etc/", securityConfigFile)
 	var err error
-	vars, err = loadHostvars(p)
+	sc, err = loadSecurityConfig(p)
 	if err != nil {
-		reboot("Cannot find hostvars: %v", err)
+		reboot("Cannot find security_configuration.json: %v", err)
 	}
 	if *doDebug {
-		str, _ := json.MarshalIndent(vars, "", "  ")
-		info("Host variables: %s", str)
+		str, _ := json.MarshalIndent(sc, "", "  ")
+		info("Security configuration: %s", str)
 	}
-	if len(vars.Fingerprints) == 0 {
-		reboot("No root certificate fingerprints found in hostvars")
+	if len(sc.Fingerprints) == 0 {
+		reboot("No root certificate fingerprints found in security_configuration.json")
 	}
 
 	/////////////////
@@ -113,14 +113,14 @@ func main() {
 	//////////
 	// Network
 	//////////
-	if vars.BootMode == NetworkStatic {
+	if sc.BootMode == NetworkStatic {
 		err = configureStaticNetwork()
 		if err != nil {
 			reboot("Cannot set up IO: %v", err)
 		}
 	}
 
-	if vars.BootMode == NetworkDHCP {
+	if sc.BootMode == NetworkDHCP {
 		err = configureDHCPNetwork()
 		if err != nil {
 			reboot("Cannot set up IO: %v", err)
@@ -130,11 +130,11 @@ func main() {
 	////////////////////
 	// Time validatition
 	////////////////////
-	if vars.Timestamp == 0 {
-		reboot("No timestamp found in hostvars")
+	if sc.Timestamp == 0 {
+		reboot("No timestamp found in security_configuration.json")
 	}
-	buildTime := time.Unix(int64(vars.Timestamp), 0)
-	useNetwork := vars.BootMode == NetworkStatic || vars.BootMode == NetworkDHCP
+	buildTime := time.Unix(int64(sc.Timestamp), 0)
+	useNetwork := sc.BootMode == NetworkStatic || sc.BootMode == NetworkDHCP
 	err = validateSystemTime(buildTime, useNetwork)
 	if err != nil {
 		reboot("%v", err)
@@ -155,7 +155,7 @@ func main() {
 
 	var ospkgFiles []string
 
-	switch vars.BootMode {
+	switch sc.BootMode {
 	case NetworkStatic, NetworkDHCP:
 		f, err := loadOSPackageFromNetwork()
 		if err != nil {
@@ -169,7 +169,7 @@ func main() {
 		}
 		ospkgFiles = append(ospkgFiles, ff...)
 	default:
-		reboot("unknown boot mode: %s", vars.BootMode.string())
+		reboot("unknown boot mode: %s", sc.BootMode.string())
 	}
 	if len(ospkgFiles) == 0 {
 		reboot("No OS packages found")
@@ -200,7 +200,7 @@ func main() {
 		fp := calculateFingerprint(ospkg.RootCertPEM)
 		info("Fingerprint of OS package's root certificate:")
 		info(fp)
-		if !fingerprintIsValid(fp, vars.Fingerprints) {
+		if !fingerprintIsValid(fp, sc.Fingerprints) {
 			debug("Root certificate of OS package does not match expacted fingerprint")
 			markInvalid(path)
 			continue
@@ -223,13 +223,13 @@ func main() {
 			markInvalid(path)
 			continue
 		}
-		if valid < vars.MinimalSignaturesMatch {
-			debug("Not enough valid signatures: %d found, %d valid, %d required", n, valid, vars.MinimalSignaturesMatch)
+		if valid < sc.MinimalSignaturesMatch {
+			debug("Not enough valid signatures: %d found, %d valid, %d required", n, valid, sc.MinimalSignaturesMatch)
 			markInvalid(path)
 			continue
 		}
 
-		debug("Signatures: %d found, %d valid, %d required", n, valid, vars.MinimalSignaturesMatch)
+		debug("Signatures: %d found, %d valid, %d required", n, valid, sc.MinimalSignaturesMatch)
 		info("OS package passed verification")
 		info(check)
 
@@ -265,7 +265,7 @@ func main() {
 		if err != nil {
 			reboot("measured boot failed: %v", err)
 		}
-		// TODO: measure hostvars.json and files from data partition
+		// TODO: measure security_configuration.json and files from data partition
 	}
 
 	//////////
@@ -329,7 +329,7 @@ func extractOS(ospkg *stboot.OSPackage) (boot.OSImage, error) {
 }
 
 func markInvalid(file string) {
-	if vars.BootMode == LocalStorage {
+	if sc.BootMode == LocalStorage {
 		// move invalid OS package to special directory
 		invalid := filepath.Join(dataMountPoint, invalidDir, filepath.Base(file))
 		if err := stboot.CreateAndCopy(file, invalid); err != nil {
@@ -342,7 +342,7 @@ func markInvalid(file string) {
 }
 
 func markCurrent(file string) {
-	if vars.BootMode == LocalStorage {
+	if sc.BootMode == LocalStorage {
 		// move current OS package to special file
 		f := filepath.Join(dataMountPoint, currentOSPkgFile)
 		rel, err := filepath.Rel(filepath.Dir(f), file)

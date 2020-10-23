@@ -15,7 +15,7 @@ var testHash = []byte{184, 125, 17, 19, 148, 144, 119, 239, 215, 18, 102, 79, 23
 // not ready yet
 func TestHash(t *testing.T) {
 	signer := Sha512PssSigner{}
-	hash, err := signer.Hash("testdata/testConfigDir/kernels/kernel1.vmlinuz")
+	hash, err := signer.Hash("testdata/testManifestDir/kernels/kernel1.vmlinuz")
 	lenght := len(hash)
 	t.Logf("hash: %v", hash)
 	require.NoError(t, err)

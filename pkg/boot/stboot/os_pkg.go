@@ -35,7 +35,7 @@ const (
 type OSPackage struct {
 	Archive           string
 	Dir               string
-	Config            *Stconfig
+	Manifest          *OSManifest
 	FilesToBeMeasured []string
 	RootCertPEM       []byte
 	Signatures        []Signature
@@ -62,17 +62,17 @@ func OSPackageFromArchive(archive string) (*OSPackage, error) {
 		return nil, fmt.Errorf("OSPackage: cannot unzip %s: %v", archive, err)
 	}
 
-	cfg, err := StconfigFromFile(filepath.Join(dir, ConfigName))
+	m, err := OSManifestFromFile(filepath.Join(dir, ManifestName))
 	if err != nil {
 		return nil, fmt.Errorf("OSPackage: getting configuration faild: %v", err)
 	}
-	if err = cfg.Validate(); err != nil {
+	if err = m.Validate(); err != nil {
 		return nil, fmt.Errorf("OSPackage: invalid config: %v", err)
 	}
 
 	ospkg.Archive = archive
 	ospkg.Dir = dir
-	ospkg.Config = cfg
+	ospkg.Manifest = m
 
 	err = ospkg.init()
 	if err != nil {
@@ -92,18 +92,18 @@ func InitOSPackage(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, 
 	name := "os-pkg-" + tstr + OSPackageExt
 	ospkg.Archive = filepath.Join(outDir, name)
 
-	dir, cfg, err := createFileTree(kernel, initramfs, tboot, rootCert, acms)
+	dir, m, err := createFileTree(kernel, initramfs, tboot, rootCert, acms)
 	if err != nil {
 		return nil, fmt.Errorf("OSPackage: creating standard file tree faild: %v", err)
 	}
 
-	cfg.Label = label
-	cfg.Cmdline = cmdline
-	cfg.AllowNonTXT = allowNonTXT
-	cfg.Write(dir)
+	m.Label = label
+	m.Cmdline = cmdline
+	m.AllowNonTXT = allowNonTXT
+	m.Write(dir)
 
 	ospkg.Dir = dir
-	ospkg.Config = &cfg
+	ospkg.Manifest = &m
 
 	err = ospkg.init()
 	if err != nil {
@@ -278,44 +278,44 @@ func (ospkg *OSPackage) Verify() (found, verified int, err error) {
 
 // OSImage retunrns a boot.OSImage generated from ospkg's configuration
 func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
-	err := ospkg.Config.Validate()
+	err := ospkg.Manifest.Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	if txt && ospkg.Config.Tboot == "" {
+	if txt && ospkg.Manifest.Tboot == "" {
 		return nil, errors.New("OSPackage does not contain a TXT-ready configuration")
 	}
 
-	if !txt && !ospkg.Config.AllowNonTXT {
+	if !txt && !ospkg.Manifest.AllowNonTXT {
 		return nil, errors.New("OSPackage requires the use of TXT")
 	}
 
 	var osi boot.OSImage
 	if !txt {
 		osi = &boot.LinuxImage{
-			Name:    ospkg.Config.Label,
-			Kernel:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Config.Kernel)),
-			Initrd:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Config.Initramfs)),
-			Cmdline: ospkg.Config.Cmdline,
+			Name:    ospkg.Manifest.Label,
+			Kernel:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)),
+			Initrd:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Initramfs)),
+			Cmdline: ospkg.Manifest.Cmdline,
 		}
 		return osi, nil
 	}
 
 	var modules []multiboot.Module
 	kernel := multiboot.Module{
-		Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Config.Kernel)),
-		Cmdline: "OS-Kernel " + ospkg.Config.Cmdline,
+		Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)),
+		Cmdline: "OS-Kernel " + ospkg.Manifest.Cmdline,
 	}
 	modules = append(modules, kernel)
 
 	initramfs := multiboot.Module{
-		Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Config.Initramfs)),
+		Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Initramfs)),
 		Cmdline: "OS-Initramfs",
 	}
 	modules = append(modules, initramfs)
 
-	for n, a := range ospkg.Config.ACMs {
+	for n, a := range ospkg.Manifest.ACMs {
 		acm := multiboot.Module{
 			Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, a)),
 			Cmdline: fmt.Sprintf("ACM%d", n+1),
@@ -324,29 +324,29 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 	}
 
 	osi = &boot.MultibootImage{
-		Name:    ospkg.Config.Label,
-		Kernel:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Config.Tboot)),
-		Cmdline: ospkg.Config.TbootArgs,
+		Name:    ospkg.Manifest.Label,
+		Kernel:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Tboot)),
+		Cmdline: ospkg.Manifest.TbootArgs,
 		Modules: modules,
 	}
 	return osi, nil
 }
 
-// getFilesToBeHashed the paths of the OSPackage' files that are supposed
-// to be hashed for signing and varifiaction. These are:
-// * stconfig.json
+// getFilesToBeHashed evaluates the paths of the OSPackage' files that are
+// supposed to be hashed for signing and varifiaction. These are:
+// * manifest.json
 // * root.cert
-// * files defined in stconfig.json if they are present
+// * files defined in manifest.json if they are present
 func (ospkg *OSPackage) getFilesToBeHashed() error {
 	var f []string
 
 	// these files must be present
-	config := filepath.Join(ospkg.Dir, ConfigName)
-	kernel := filepath.Join(ospkg.Dir, ospkg.Config.Kernel)
+	config := filepath.Join(ospkg.Dir, ManifestName)
+	kernel := filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)
 	rootCert := filepath.Join(ospkg.Dir, rootCertPath)
 	_, err := os.Stat(config)
 	if err != nil {
-		return errors.New("files to be measured: missing stconfig.json")
+		return errors.New("files to be measured: missing manifest.json")
 	}
 	_, err = os.Stat(kernel)
 	if err != nil {
@@ -359,21 +359,21 @@ func (ospkg *OSPackage) getFilesToBeHashed() error {
 	f = append(f, config, kernel, rootCert)
 
 	// following files are measured if present
-	if ospkg.Config.Initramfs != "" {
-		initramfs := filepath.Join(ospkg.Dir, ospkg.Config.Initramfs)
+	if ospkg.Manifest.Initramfs != "" {
+		initramfs := filepath.Join(ospkg.Dir, ospkg.Manifest.Initramfs)
 		_, err = os.Stat(initramfs)
 		if err == nil {
 			f = append(f, initramfs)
 		}
 	}
-	if ospkg.Config.Tboot != "" {
-		tboot := filepath.Join(ospkg.Dir, ospkg.Config.Tboot)
+	if ospkg.Manifest.Tboot != "" {
+		tboot := filepath.Join(ospkg.Dir, ospkg.Manifest.Tboot)
 		_, err = os.Stat(tboot)
 		if err == nil {
 			f = append(f, tboot)
 		}
 	}
-	for _, acm := range ospkg.Config.ACMs {
+	for _, acm := range ospkg.Manifest.ACMs {
 		a := filepath.Join(ospkg.Dir, acm)
 		_, err = os.Stat(a)
 		if err == nil {
@@ -425,9 +425,9 @@ func (ospkg *OSPackage) getSignatures() error {
 }
 
 // createFileTree copies the provided files to a well known tree inside
-// the OSPackage's underlying tmpDir. The created tmpDir and a Stconfig
+// the OSPackage's underlying tmpDir. The created tmpDir and a manifest
 // initialized with corresponding paths is retruned.
-func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (dir string, cfg Stconfig, err error) {
+func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (dir string, m OSManifest, err error) {
 	dir, err = ioutil.TempDir(os.TempDir(), "os-package")
 	if err != nil {
 		return
@@ -449,7 +449,7 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 	if err = CreateAndCopy(kernel, dst); err != nil {
 		return
 	}
-	cfg.Kernel = rel
+	m.Kernel = rel
 
 	// Initramfs
 	if initramfs != "" {
@@ -458,7 +458,7 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 		if err = CreateAndCopy(initramfs, dst); err != nil {
 			return
 		}
-		cfg.Initramfs = rel
+		m.Initramfs = rel
 	}
 
 	// tboot
@@ -468,7 +468,7 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 		if err = CreateAndCopy(tboot, dst); err != nil {
 			return
 		}
-		cfg.Tboot = rel
+		m.Tboot = rel
 	}
 
 	// Root Certificate
@@ -488,7 +488,7 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 			if err = CreateAndCopy(acm, dst); err != nil {
 				return
 			}
-			cfg.ACMs = append(cfg.ACMs, rel)
+			m.ACMs = append(m.ACMs, rel)
 		}
 	}
 

@@ -30,7 +30,7 @@ func TestCreateFileTree(t *testing.T) {
 	acm2RelPath := filepath.Join(acmDir, filepath.Base(acm2))
 	acm3RelPath := filepath.Join(acmDir, filepath.Base(acm3))
 
-	var goldenCfg = Stconfig{
+	var goldenManifest = OSManifest{
 		Kernel:    kernelRelPath,
 		Initramfs: initramfsRelPath,
 		Tboot:     tbootRelPath,
@@ -46,7 +46,7 @@ func TestCreateFileTree(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, acm1RelPath))
 	require.FileExists(t, filepath.Join(dir, acm2RelPath))
 	require.FileExists(t, filepath.Join(dir, acm3RelPath))
-	require.Equal(t, goldenCfg, cfg)
+	require.Equal(t, goldenManifest, cfg)
 
 	err = os.RemoveAll(dir)
 	require.NoError(t, err)

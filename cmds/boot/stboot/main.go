@@ -211,10 +211,10 @@ func main() {
 		// Verify OS package
 		////////////////////
 		if *doDebug {
-			str, _ := json.MarshalIndent(ospkg.Config, "", "  ")
-			info("OS package config: %s", str)
+			str, _ := json.MarshalIndent(ospkg.Manifest, "", "  ")
+			info("OS package manifest: %s", str)
 		} else {
-			info("Label: %s", ospkg.Config.Label)
+			info("Label: %s", ospkg.Manifest.Label)
 		}
 
 		n, valid, err := ospkg.Verify()

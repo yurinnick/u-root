@@ -15,8 +15,8 @@ const (
 	// DefaultOSPackageName is the file name of the archive, which is expected to contain
 	// the stboot configuration file along with the corresponding files
 	DefaultOSPackageName string = "ospkg.zip"
-	// ConfigName is the name of the stboot configuration file
-	ConfigName string = "stconfig.json"
+	// ManifestName is the name of OS packages' internal configuration file
+	ManifestName string = "manifest.json"
 )
 
 // ComposeIndividualOSPackagePrefix returns a host specific name prefix for OS package files.

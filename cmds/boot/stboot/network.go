@@ -9,7 +9,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -39,41 +38,20 @@ type netConf struct {
 	DNSServer      string `json:"dns"`
 }
 
-func getNetConf() (netConf, error) {
-	p := filepath.Join(dataMountPoint, networkFile)
-	bytes, err := ioutil.ReadFile(p)
-	var net netConf
-	if err != nil {
-		return net, fmt.Errorf("Failed to read file %s due to: %v", p, err)
-	}
-	err = json.Unmarshal(bytes, &net)
-	if err != nil {
-		return net, fmt.Errorf("Failed to unmarshel file %s due to: %v", p, err)
-	}
-	return net, nil
-}
-
 func configureStaticNetwork() error {
-	nc, err := getNetConf()
-	if err != nil {
-		debug("cannot read network configuration file: %v", err)
-	}
-	if *doDebug {
-		str, _ := json.MarshalIndent(nc, "", "  ")
-		info("Network configuration: %s", str)
-	}
-	if nc.HostIP == "" {
+
+	if hc.HostIP == "" {
 		return errors.New("invald network configuration: missing host IP")
 	}
-	if nc.DefaultGateway == "" {
+	if hc.DefaultGateway == "" {
 		return errors.New("invald network configuration: missing default gateway")
 	}
-	info("Setup network configuration with IP: " + nc.HostIP)
-	addr, err := netlink.ParseAddr(nc.HostIP)
+	info("Setup network configuration with IP: " + hc.HostIP)
+	addr, err := netlink.ParseAddr(hc.HostIP)
 	if err != nil {
 		return fmt.Errorf("error parsing HostIP string to CIDR format address: %v", err)
 	}
-	gateway, err := netlink.ParseAddr(nc.DefaultGateway)
+	gateway, err := netlink.ParseAddr(hc.DefaultGateway)
 	if err != nil {
 		return fmt.Errorf("error parsing DefaultGateway string to CIDR format address: %v", err)
 	}
@@ -149,19 +127,15 @@ func configureDHCPNetwork() error {
 }
 
 func setDNSServer() error {
-	nc, err := getNetConf()
-	if err != nil {
-		return fmt.Errorf("cannot read network configuration file: %v", err)
-	}
-	if nc.DNSServer == "" {
+	if hc.DNSServer == "" {
 		return errors.New("missing dns server entry in network configuration file")
 	}
-	dns := net.ParseIP(nc.DNSServer)
+	dns := net.ParseIP(hc.DNSServer)
 	if dns == nil {
-		return fmt.Errorf("cannot parse DNSServer string %s", nc.DNSServer)
+		return fmt.Errorf("cannot parse DNSServer string %s", hc.DNSServer)
 	}
 	resolvconf := fmt.Sprintf("nameserver %s\n", dns.String())
-	if err = ioutil.WriteFile("/etc/resolv.conf", []byte(resolvconf), 0644); err != nil {
+	if err := ioutil.WriteFile("/etc/resolv.conf", []byte(resolvconf), 0644); err != nil {
 		return fmt.Errorf("could not write DNS servers to resolv.conf: %v", err)
 	}
 	return nil

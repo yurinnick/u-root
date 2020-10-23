@@ -34,15 +34,22 @@ var (
 	debug = func(string, ...interface{}) {}
 
 	sc                 *SecurityConfig
+	hc                 *HostConfig
 	txtSupportedByHost bool
 )
 
+type HostConfig struct {
+	HostIP           string   `json:"host_ip"`
+	DefaultGateway   string   `json:"gateway"`
+	DNSServer        string   `json:"dns"`
+	ProvisioningURLs []string `json:"provisioning_urls"`
+	NTPURLs          []string `json:"ntp_urls"`
+}
+
 // configuration files form STDATA partition
 const (
-	provisioningServerFile = "stboot/etc/provisioning-servers.json"
-	networkFile            = "stboot/etc/network.json"
-	httpsRootsFile         = "stboot/etc/https-root-certificates.pem"
-	ntpServerFile          = "stboot/etc/ntp-servers.json"
+	hostConfigurationFile = "stboot/etc/host_configuration.json"
+	httpsRootsFile        = "stboot/etc/https-root-certificates.pem"
 
 	newDir           = "stboot/os_pkgs/new/"
 	knownGoodDir     = "stboot/os_pkgs/known_good/"
@@ -108,6 +115,21 @@ func main() {
 	err = findDataPartition(60)
 	if err != nil {
 		reboot("Failed to find DATA partition: %v", err)
+	}
+
+	// load host configuration
+	p = filepath.Join(dataMountPoint, hostConfigurationFile)
+	bytes, err := ioutil.ReadFile(p)
+	if err != nil {
+		reboot("Failed to load host_configuration.json: %v", err)
+	}
+	err = json.Unmarshal(bytes, &hc)
+	if err != nil {
+		reboot("Failed to unmarshal host_configuration.json: %v", err)
+	}
+	if *doDebug {
+		str, _ := json.MarshalIndent(hc, "", "  ")
+		info("Network configuration: %s", str)
 	}
 
 	//////////
@@ -356,16 +378,7 @@ func markCurrent(file string) {
 }
 
 func loadOSPackageFromNetwork() (string, error) {
-	p := filepath.Join(dataMountPoint, provisioningServerFile)
-	bytes, err := ioutil.ReadFile(p)
-	if err != nil {
-		return "", fmt.Errorf("provisioning server URLs: %v", err)
-	}
-	var urlStrings []string
-	if err = json.Unmarshal(bytes, &urlStrings); err != nil {
-		return "", fmt.Errorf("provisioning server URLs: %v", err)
-	}
-	if err = forceHTTPS(urlStrings); err != nil {
+	if err := forceHTTPS(hc.ProvisioningURLs); err != nil {
 		return "", fmt.Errorf("provisioning server URLs: %v", err)
 	}
 
@@ -377,11 +390,11 @@ func loadOSPackageFromNetwork() (string, error) {
 	info("Host's HW address: %s", hwAddr.String())
 	prefix := stboot.ComposeIndividualOSPackagePrefix(hwAddr)
 	file := prefix + stboot.DefaultOSPackageName
-	dest, err := tryDownload(urlStrings, file)
+	dest, err := tryDownload(hc.ProvisioningURLs, file)
 	if err != nil {
 		debug("%v", err)
 		info("Try downloading general OS package")
-		dest, err = tryDownload(urlStrings, stboot.DefaultOSPackageName)
+		dest, err = tryDownload(hc.ProvisioningURLs, stboot.DefaultOSPackageName)
 		if err != nil {
 			debug("%v", err)
 			return "", fmt.Errorf("cannot get appropriate OS package from provisioning servers")

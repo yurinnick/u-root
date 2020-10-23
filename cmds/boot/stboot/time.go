@@ -5,11 +5,8 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"path/filepath"
 	"time"
 
 	"github.com/beevik/ntp"
@@ -19,16 +16,7 @@ import (
 // pollNTP queries the specified NTP server.
 // On error the query is repeated infinitally.
 func pollNTP() (time.Time, error) {
-	p := filepath.Join(dataMountPoint, ntpServerFile)
-	bytes, err := ioutil.ReadFile(p)
-	if err != nil {
-		reboot("NTP server URLs: %v", err)
-	}
-	var servers []string
-	if err = json.Unmarshal(bytes, &servers); err != nil {
-		return time.Time{}, err
-	}
-	for _, server := range servers {
+	for _, server := range hc.NTPURLs {
 		info("Query NTP server %s", server)
 		t, err := ntp.Time(server)
 		if err == nil {

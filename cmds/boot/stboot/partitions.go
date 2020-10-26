@@ -22,19 +22,30 @@ import (
 )
 
 const (
-	dataPartitionFSType = "ext4"
-	dataPartitionLabel  = "STDATA"
-	dataMountPoint      = "data"
+	dataPartitionFSType     = "ext4"
+	dataPartitionLabel      = "STDATA"
+	dataPartitionMountPoint = "data"
+	bootPartitionFSType     = "vfat"
+	bootPartitionLabel      = "STBOOT"
+	bootPartitionMountPoint = "boot"
 )
 
-func findDataPartition(timeout uint) error {
-	debug("Search data partition with label %s ...", dataPartitionLabel)
+func findBootPartition() error {
+	return findPartition(bootPartitionLabel, bootPartitionFSType, bootPartitionMountPoint, 60)
+}
+
+func findDataPartition() error {
+	return findPartition(dataPartitionLabel, dataPartitionFSType, dataPartitionMountPoint, 60)
+}
+
+func findPartition(label, fsType, mountPoint string, timeout uint) error {
+	debug("Search partition with label %s ...", label)
 	fs, err := ioutil.ReadFile("/proc/filesystems")
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(string(fs), dataPartitionFSType) {
-		return fmt.Errorf("filesystem unknown: %s", dataPartitionFSType)
+	if !strings.Contains(string(fs), fsType) {
+		return fmt.Errorf("filesystem unknown: %s", fsType)
 	}
 
 	var devices []string
@@ -47,7 +58,7 @@ func findDataPartition(timeout uint) error {
 			if timeout == 0 {
 				return fmt.Errorf("no non-loopback block devices found")
 			}
-			debug("waiting for block devices to appear...\n")
+			debug("waiting for block devices to appear %d...", timeout)
 
 			timeout--
 			time.Sleep(time.Second)
@@ -56,17 +67,17 @@ func findDataPartition(timeout uint) error {
 		}
 	}
 
-	device, err := deviceByPartLabel(devices, dataPartitionLabel)
+	device, err := deviceByPartLabel(devices, label)
 	if err != nil {
-		return fmt.Errorf("Failed to get device by partition label: %v", err)
+		return fmt.Errorf("failed to get device with label %s: %v", label, err)
 	}
 
-	mp, err := mount.Mount(device, dataMountPoint, dataPartitionFSType, "", 0)
+	mp, err := mount.Mount(device, mountPoint, fsType, "", 0)
 	if err != nil {
-		return fmt.Errorf("Failed to mount device %s: %v", device, err)
+		return fmt.Errorf("failed to mount device %s: %v", device, err)
 	}
 
-	debug("data partition %s mounted at %s", mp.Device, mp.Path)
+	debug("partition %s mounted at %s", mp.Device, mp.Path)
 	return nil
 }
 
@@ -129,7 +140,7 @@ func deviceByPartLabel(devices []string, label string) (string, error) {
 			if l == label {
 				d = device
 				p = strconv.Itoa(n + 1)
-				info("Found data partition on %s , partition %s", device, p)
+				info("Found partition on %s , partition %s", device, p)
 				break
 			}
 			debug("Skip %s partition %d: label does not match %s", device, n+1, label)

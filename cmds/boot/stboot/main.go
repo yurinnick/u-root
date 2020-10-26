@@ -109,16 +109,20 @@ func main() {
 		reboot("No root certificate fingerprints found in security_configuration.json")
 	}
 
-	/////////////////
-	// Data partition
-	/////////////////
-	err = findDataPartition(60)
+	//////////////////////////////
+	// STBOOT and STDATA partition
+	//////////////////////////////
+	err = findBootPartition()
 	if err != nil {
-		reboot("Failed to find DATA partition: %v", err)
+		reboot("STBOOT partition: %v", err)
+	}
+	err = findDataPartition()
+	if err != nil {
+		reboot("STDATA partition: %v", err)
 	}
 
 	// load host configuration
-	p = filepath.Join(dataMountPoint, hostConfigurationFile)
+	p = filepath.Join(dataPartitionMountPoint, hostConfigurationFile)
 	bytes, err := ioutil.ReadFile(p)
 	if err != nil {
 		reboot("Failed to load host_configuration.json: %v", err)
@@ -129,7 +133,7 @@ func main() {
 	}
 	if *doDebug {
 		str, _ := json.MarshalIndent(hc, "", "  ")
-		info("Network configuration: %s", str)
+		info("Host configuration: %s", str)
 	}
 
 	//////////
@@ -353,7 +357,7 @@ func extractOS(ospkg *stboot.OSPackage) (boot.OSImage, error) {
 func markInvalid(file string) {
 	if sc.BootMode == LocalStorage {
 		// move invalid OS package to special directory
-		invalid := filepath.Join(dataMountPoint, invalidDir, filepath.Base(file))
+		invalid := filepath.Join(dataPartitionMountPoint, invalidDir, filepath.Base(file))
 		if err := stboot.CreateAndCopy(file, invalid); err != nil {
 			reboot("failed to move invalid OS package: %v", err)
 		}
@@ -366,7 +370,7 @@ func markInvalid(file string) {
 func markCurrent(file string) {
 	if sc.BootMode == LocalStorage {
 		// move current OS package to special file
-		f := filepath.Join(dataMountPoint, currentOSPkgFile)
+		f := filepath.Join(dataPartitionMountPoint, currentOSPkgFile)
 		rel, err := filepath.Rel(filepath.Dir(f), file)
 		if err != nil {
 			reboot("failed to indicate current OS package: %v", err)
@@ -410,7 +414,7 @@ func loadOSPackageFromLocalStorage() ([]string, error) {
 	var knownGoodPkgs []string
 
 	//new OS packages
-	dir := filepath.Join(dataMountPoint, newDir)
+	dir := filepath.Join(dataPartitionMountPoint, newDir)
 	newPkgs, err := searchOSPackageFiles(dir)
 	if err != nil {
 		return nil, err
@@ -418,7 +422,7 @@ func loadOSPackageFromLocalStorage() ([]string, error) {
 	ospkgs = append(ospkgs, newPkgs...)
 
 	// known good OS packages
-	dir = filepath.Join(dataMountPoint, knownGoodDir)
+	dir = filepath.Join(dataPartitionMountPoint, knownGoodDir)
 	knownGoodPkgs, err = searchOSPackageFiles(dir)
 	if err != nil {
 		return nil, err

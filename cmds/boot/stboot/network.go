@@ -263,8 +263,7 @@ func download(url string, destination string) error {
 // for HTTPS and verifies it.
 func loadHTTPSCertificates() (*x509.CertPool, error) {
 	roots := x509.NewCertPool()
-	p := filepath.Join(dataPartitionMountPoint, httpsRootsFile)
-	bytes, err := ioutil.ReadFile(p)
+	bytes, err := ioutil.ReadFile(httpsRootsFile)
 	if err != nil {
 		return roots, err
 	}

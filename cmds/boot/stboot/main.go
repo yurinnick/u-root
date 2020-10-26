@@ -46,11 +46,19 @@ type HostConfig struct {
 	NTPURLs          []string `json:"ntp_urls"`
 }
 
-// configuration files form STDATA partition
+// files at initramfs
 const (
-	hostConfigurationFile = "stboot/etc/host_configuration.json"
-	httpsRootsFile        = "stboot/etc/https-root-certificates.pem"
+	securityConfigFile = "/etc/security_configuration.json"
+	httpsRootsFile     = "/etc/https_roots.pem"
+)
 
+// files at STBOOT partition
+const (
+	hostConfigurationFile = "/host_configuration.json"
+)
+
+// files at STDATA partition
+const (
 	newDir           = "stboot/os_pkgs/new/"
 	knownGoodDir     = "stboot/os_pkgs/known_good/"
 	invalidDir       = "stboot/os_pkgs/invalid/"
@@ -95,9 +103,8 @@ func main() {
 	/////////////////////////
 	// Security configuration
 	/////////////////////////
-	p := filepath.Join("etc/", securityConfigFile)
 	var err error
-	sc, err = loadSecurityConfig(p)
+	sc, err = loadSecurityConfig(securityConfigFile)
 	if err != nil {
 		reboot("Cannot find security_configuration.json: %v", err)
 	}
@@ -122,7 +129,7 @@ func main() {
 	}
 
 	// load host configuration
-	p = filepath.Join(dataPartitionMountPoint, hostConfigurationFile)
+	p := filepath.Join(bootPartitionMountPoint, hostConfigurationFile)
 	bytes, err := ioutil.ReadFile(p)
 	if err != nil {
 		reboot("Failed to load host_configuration.json: %v", err)

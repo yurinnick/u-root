@@ -10,8 +10,6 @@ import (
 	"io/ioutil"
 )
 
-const securityConfigFile = "security_configuration.json"
-
 //go:generate jsonenums -type=bootmode
 type bootmode int
 

@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/stboot"
@@ -59,6 +58,7 @@ const (
 
 // files at STDATA partition
 const (
+	timeFixFile      = "stboot/etc/system_time_fix"
 	newDir           = "stboot/os_pkgs/new/"
 	knownGoodDir     = "stboot/os_pkgs/known_good/"
 	invalidDir       = "stboot/os_pkgs/invalid/"
@@ -163,12 +163,16 @@ func main() {
 	////////////////////
 	// Time validatition
 	////////////////////
-	if sc.Timestamp == 0 {
-		reboot("No timestamp found in security_configuration.json")
+	p = filepath.Join(dataPartitionMountPoint, timeFixFile)
+	timeFixRaw, err := ioutil.ReadFile(p)
+	if err != nil {
+		reboot("time validation: %v", err)
 	}
-	buildTime := time.Unix(int64(sc.Timestamp), 0)
-	useNetwork := sc.BootMode == NetworkStatic || sc.BootMode == NetworkDHCP
-	err = validateSystemTime(buildTime, useNetwork)
+	buildTime, err := parseUNIXTimestamp(string(timeFixRaw))
+	if err != nil {
+		reboot("time validation: %v", err)
+	}
+	err = checkSystemTime(buildTime)
 	if err != nil {
 		reboot("%v", err)
 	}

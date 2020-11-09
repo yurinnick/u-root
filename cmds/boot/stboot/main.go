@@ -59,10 +59,8 @@ const (
 // files at STDATA partition
 const (
 	timeFixFile      = "stboot/etc/system_time_fix"
-	newDir           = "stboot/os_pkgs/new/"
-	knownGoodDir     = "stboot/os_pkgs/known_good/"
-	invalidDir       = "stboot/os_pkgs/invalid/"
-	currentOSPkgFile = "stboot/os_pkgs/current-ospkg.zip"
+	localOSPkgDir    = "stboot/os_pkgs/local/"
+	currentOSPkgFile = "stboot/etc/current_ospkg_pathname"
 )
 
 var banner = `
@@ -227,7 +225,6 @@ func main() {
 		ospkg, err := stboot.OSPackageFromArchive(path)
 		if err != nil {
 			debug("%v", err)
-			markInvalid(path)
 			continue
 		}
 
@@ -239,7 +236,6 @@ func main() {
 		info(fp)
 		if !fingerprintIsValid(fp, sc.Fingerprints) {
 			debug("Root certificate of OS package does not match expacted fingerprint")
-			markInvalid(path)
 			continue
 		}
 		info("OK!")
@@ -257,12 +253,10 @@ func main() {
 		n, valid, err := ospkg.Verify()
 		if err != nil {
 			debug("Error verifying OS package: %v", err)
-			markInvalid(path)
 			continue
 		}
 		if valid < sc.MinimalSignaturesMatch {
 			debug("Not enough valid signatures: %d found, %d valid, %d required", n, valid, sc.MinimalSignaturesMatch)
-			markInvalid(path)
 			continue
 		}
 
@@ -276,11 +270,12 @@ func main() {
 		osi, err = extractOS(ospkg)
 		if err != nil {
 			debug("%v", err)
-			markInvalid(path)
 			continue
 		}
 
-		markCurrent(path)
+		if sc.BootMode == LocalStorage {
+			markCurrentOSpkg(path)
+		}
 		break
 	} // end process-os-pkgs-loop
 
@@ -365,30 +360,15 @@ func extractOS(ospkg *stboot.OSPackage) (boot.OSImage, error) {
 	}
 }
 
-func markInvalid(file string) {
-	if sc.BootMode == LocalStorage {
-		// move invalid OS package to special directory
-		invalid := filepath.Join(dataPartitionMountPoint, invalidDir, filepath.Base(file))
-		if err := stboot.CreateAndCopy(file, invalid); err != nil {
-			reboot("failed to move invalid OS package: %v", err)
-		}
-		if err := os.Remove(file); err != nil {
-			reboot("failed to move invalid OS package: %v", err)
-		}
+func markCurrentOSpkg(file string) {
+	f := filepath.Join(dataPartitionMountPoint, currentOSPkgFile)
+	rel, err := filepath.Rel(filepath.Dir(f), file)
+	if err != nil {
+		reboot("failed to indicate current OS package: %v", err)
 	}
-}
-
-func markCurrent(file string) {
-	if sc.BootMode == LocalStorage {
-		// move current OS package to special file
-		f := filepath.Join(dataPartitionMountPoint, currentOSPkgFile)
-		rel, err := filepath.Rel(filepath.Dir(f), file)
-		if err != nil {
-			reboot("failed to indicate current OS package: %v", err)
-		}
-		if err = ioutil.WriteFile(f, []byte(rel), os.ModePerm); err != nil {
-			reboot("failed to indicate current OS package: %v", err)
-		}
+	rel = rel + string('\n')
+	if err = ioutil.WriteFile(f, []byte(rel), os.ModePerm); err != nil {
+		reboot("failed to indicate current OS package: %v", err)
 	}
 }
 
@@ -420,26 +400,8 @@ func loadOSPackageFromNetwork() (string, error) {
 }
 
 func loadOSPackageFromLocalStorage() ([]string, error) {
-	var ospkgs []string
-	var newPkgs []string
-	var knownGoodPkgs []string
-
-	//new OS packages
-	dir := filepath.Join(dataPartitionMountPoint, newDir)
-	newPkgs, err := searchOSPackageFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-	ospkgs = append(ospkgs, newPkgs...)
-
-	// known good OS packages
-	dir = filepath.Join(dataPartitionMountPoint, knownGoodDir)
-	knownGoodPkgs, err = searchOSPackageFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-	ospkgs = append(ospkgs, knownGoodPkgs...)
-	return ospkgs, nil
+	dir := filepath.Join(dataPartitionMountPoint, localOSPkgDir)
+	return searchOSPackageFiles(dir)
 }
 
 func searchOSPackageFiles(dir string) ([]string, error) {

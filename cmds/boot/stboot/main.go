@@ -42,7 +42,6 @@ type HostConfig struct {
 	DefaultGateway   string   `json:"gateway"`
 	DNSServer        string   `json:"dns"`
 	ProvisioningURLs []string `json:"provisioning_urls"`
-	NTPURLs          []string `json:"ntp_urls"`
 }
 
 // files at initramfs

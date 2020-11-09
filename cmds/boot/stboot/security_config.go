@@ -30,8 +30,6 @@ type SecurityConfig struct {
 	MinimalSignaturesMatch int `json:"minimal_signatures_match"`
 	// Fingerprints are used to validate the root certificate insinde the OS package.
 	Fingerprints []string `json:"fingerprints"`
-	// Timestamp is the UNIX build time of the bootloader
-	Timestamp int `json:"build_timestamp"`
 	//BootMode
 	BootMode bootmode `json:"boot_mode"`
 }

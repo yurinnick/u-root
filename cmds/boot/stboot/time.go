@@ -5,32 +5,31 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"time"
 
-	"github.com/beevik/ntp"
 	"github.com/u-root/u-root/pkg/rtc"
 )
 
-// pollNTP queries the specified NTP server.
-// On error the query is repeated infinitally.
-func pollNTP() (time.Time, error) {
-	for _, server := range hc.NTPURLs {
-		info("Query NTP server %s", server)
-		t, err := ntp.Time(server)
-		if err == nil {
-			return t, nil
-		}
-		debug("NTP error: %v", err)
+func parseUNIXTimestamp(raw string) (time.Time, error) {
+	reg, err := regexp.Compile("[^0-9]+")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing UNIX timestamp: %v", err)
 	}
-	//time.Sleep(3 * time.Second)
-	return time.Time{}, errors.New("No NTP server resposnes")
+	digits := reg.ReplaceAllString(raw, "")
+
+	timeFixInt64, err := strconv.ParseInt(string(digits), 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing UNIX timestamp: %v", err)
+	}
+	return time.Unix(timeFixInt64, 0), nil
 }
 
 // validateSystemTime sets RTC and OS time according to
 // realtime clock, timestamp and ntp
-func validateSystemTime(builtTime time.Time, useNetwork bool) error {
+func checkSystemTime(builtTime time.Time) error {
 	rtc, err := rtc.OpenRTC()
 	if err != nil {
 		return fmt.Errorf("opening RTC failed: %v", err)
@@ -43,24 +42,10 @@ func validateSystemTime(builtTime time.Time, useNetwork bool) error {
 	info("Systemtime: %v", rtcTime.UTC())
 	if rtcTime.UTC().Before(builtTime.UTC()) {
 		info("Systemtime is invalid: %v", rtcTime.UTC())
-		var newTime time.Time
-		if useNetwork {
-			info("Receive time via NTP")
-			newTime, err = pollNTP()
-			if err != nil {
-				return err
-			}
-			if newTime.UTC().Before(builtTime.UTC()) {
-				return errors.New("NTP spoof may happened")
-			}
-		} else {
-			info("Configured not to use network to update time")
-			info("Set system time to timestamp of security_configuration.json")
-			info("WARNING: System time will not be up to date!")
-			newTime = builtTime
-		}
-		info("Update RTC to %v", newTime.UTC())
-		err = rtc.Set(newTime)
+		info("Set system time to stboot installation timestamp")
+		info("WARNING: System time will not be up to date!")
+		info("Update RTC to %v", builtTime.UTC())
+		err = rtc.Set(builtTime)
 		if err != nil {
 			return fmt.Errorf("writing RTC failed: %v", err)
 		}

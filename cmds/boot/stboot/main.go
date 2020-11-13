@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -57,9 +58,10 @@ const (
 
 // files at STDATA partition
 const (
-	timeFixFile      = "stboot/etc/system_time_fix"
-	localOSPkgDir    = "stboot/os_pkgs/local/"
-	currentOSPkgFile = "stboot/etc/current_ospkg_pathname"
+	timeFixFile        = "stboot/etc/system_time_fix"
+	localOSPkgDir      = "stboot/os_pkgs/local/"
+	localBootOrderFile = "stboot/etc/local_boot_order"
+	currentOSPkgFile   = "stboot/etc/current_ospkg_pathname"
 )
 
 var banner = `
@@ -399,27 +401,27 @@ func loadOSPackageFromNetwork() (string, error) {
 }
 
 func loadOSPackageFromLocalStorage() ([]string, error) {
-	dir := filepath.Join(dataPartitionMountPoint, localOSPkgDir)
-	return searchOSPackageFiles(dir)
+	f := filepath.Join(dataPartitionMountPoint, localBootOrderFile)
+	return parseLocalBootOrder(f)
 }
 
-func searchOSPackageFiles(dir string) ([]string, error) {
-	var ret []string
-	fis, err := ioutil.ReadDir(dir)
+func parseLocalBootOrder(bootOrderFile string) ([]string, error) {
+	ret := make([]string, 0)
+
+	f, err := os.Open(bootOrderFile)
 	if err != nil {
-		return nil, err
+		return ret, err
 	}
-	for _, fi := range fis {
-		// take *.zip files only
-		if filepath.Ext(fi.Name()) == ".zip" {
-			b := filepath.Join(dir, fi.Name())
-			ret = append(ret, b)
-		}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		p := filepath.Join(dataPartitionMountPoint, localOSPkgDir, scanner.Text())
+		ret = append(ret, p)
 	}
-	// reverse order
-	for i := 0; i < len(ret)/2; i++ {
-		j := len(ret) - i - 1
-		ret[i], ret[j] = ret[j], ret[i]
+
+	if err := scanner.Err(); err != nil {
+		return ret, err
 	}
 	return ret, nil
 }

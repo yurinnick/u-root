@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/multiboot"
@@ -84,13 +83,10 @@ func OSPackageFromArchive(archive string) (*OSPackage, error) {
 
 // InitOSPackage constructs a OSPackage from the parsed files. The underlying
 // tmporary directory is created with standardized paths and names.
-func InitOSPackage(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool) (*OSPackage, error) {
+func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool) (*OSPackage, error) {
 	var ospkg = &OSPackage{}
 
-	t := time.Now()
-	tstr := fmt.Sprintf("%04d-%02d-%02d-%02d-%02d-%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
-	name := "os-pkg-" + tstr + OSPackageExt
-	ospkg.Archive = filepath.Join(outDir, name)
+	ospkg.Archive = out
 
 	dir, m, err := createFileTree(kernel, initramfs, tboot, rootCert, acms)
 	if err != nil {

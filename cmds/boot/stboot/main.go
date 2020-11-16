@@ -378,23 +378,11 @@ func loadOSPackageFromNetwork() (string, error) {
 		return "", fmt.Errorf("provisioning server URLs: %v", err)
 	}
 
-	info("Try downloading individual OS package")
-	hwAddr, err := hostHWAddr()
-	if err != nil {
-		return "", fmt.Errorf("cannot evaluate hardware address: %v", err)
-	}
-	info("Host's HW address: %s", hwAddr.String())
-	prefix := stboot.ComposeIndividualOSPackagePrefix(hwAddr)
-	file := prefix + stboot.DefaultOSPackageName
-	dest, err := tryDownload(hc.ProvisioningURLs, file)
+	info("Try downloading OS package")
+	dest, err := tryDownload(hc.ProvisioningURLs, stboot.DefaultOSPackageName)
 	if err != nil {
 		debug("%v", err)
-		info("Try downloading general OS package")
-		dest, err = tryDownload(hc.ProvisioningURLs, stboot.DefaultOSPackageName)
-		if err != nil {
-			debug("%v", err)
-			return "", fmt.Errorf("cannot get appropriate OS package from provisioning servers")
-		}
+		return "", fmt.Errorf("cannot get %s from provisioning servers", stboot.DefaultOSPackageName)
 	}
 
 	return dest, nil

@@ -22,10 +22,9 @@ type OSManifest struct {
 	Initramfs string `json:"initramfs"`
 	Cmdline   string `json:"cmdline"`
 
-	Tboot       string   `json:"tboot"`
-	TbootArgs   string   `json:"tboot_args"`
-	ACMs        []string `json:"acms"`
-	AllowNonTXT bool     `json:"allow_non_txt"`
+	Tboot     string   `json:"tboot"`
+	TbootArgs string   `json:"tboot_args"`
+	ACMs      []string `json:"acms"`
 }
 
 // OSManifestFromFile parses a manifest from a json file
@@ -86,13 +85,8 @@ func (m *OSManifest) Validate() error {
 	if m.Kernel == "" {
 		return errors.New("manifest: missing kernel")
 	}
-	if !m.AllowNonTXT {
-		if m.Tboot == "" {
-			return errors.New("manifest: TXT required but missing tboot binary")
-		}
-		if len(m.ACMs) == 0 {
-			return errors.New("manifest: TXT required but missing ACM")
-		}
+	if m.Tboot != "" && len(m.ACMs) == 0 {
+		return errors.New("manifest: tboot provided but missing ACM")
 	}
 	return nil
 }

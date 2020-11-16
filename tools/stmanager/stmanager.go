@@ -29,17 +29,16 @@ const (
 var goversion string
 
 var (
-	create            = kingpin.Command("create", "Create a OS package from the provided operating system files")
-	createOut         = create.Flag("out", "Path to output initramfs file. Defaults to current directory").String()
-	createLabel       = create.Flag("label", "Name of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
-	createKernel      = create.Flag("kernel", "Operation system kernel").Required().ExistingFile()
-	createInitramfs   = create.Flag("initramfs", "Operation system initramfs").ExistingFile()
-	createCmdline     = create.Flag("cmd", "Kernel command line").String()
-	createTboot       = create.Flag("tboot", "Pre-execution module that sets up TXT").ExistingFile()
-	createTbootArgs   = create.Flag("tcmd", "tboot command line").String()
-	createRootCert    = create.Flag("cert", "Root certificate of certificates used for signing").Required().ExistingFile()
-	createACM         = create.Flag("acm", "Authenticated Code Module for TXT. This can be a path to single ACM or directory containig multiple ACMs.").ExistingFileOrDir()
-	createAllowNonTXT = create.Flag("unsave", "Allow booting without TXT").Bool()
+	create          = kingpin.Command("create", "Create a OS package from the provided operating system files")
+	createOut       = create.Flag("out", "Path to output initramfs file. Defaults to current directory").String()
+	createLabel     = create.Flag("label", "Name of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
+	createKernel    = create.Flag("kernel", "Operation system kernel").Required().ExistingFile()
+	createInitramfs = create.Flag("initramfs", "Operation system initramfs").ExistingFile()
+	createCmdline   = create.Flag("cmd", "Kernel command line").String()
+	createTboot     = create.Flag("tboot", "Pre-execution module that sets up TXT").ExistingFile()
+	createTbootArgs = create.Flag("tcmd", "tboot command line").String()
+	createRootCert  = create.Flag("cert", "Root certificate of certificates used for signing").Required().ExistingFile()
+	createACM       = create.Flag("acm", "Authenticated Code Module for TXT. This can be a path to single ACM or directory containig multiple ACMs.").ExistingFileOrDir()
 
 	sign            = kingpin.Command("sign", "Sign the binary inside the provided OS package")
 	signPrivKeyFile = sign.Flag("key", "Private key for signing").Required().ExistingFile()
@@ -69,7 +68,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		if err := packOSPackage(out, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, *createRootCert, acms, *createAllowNonTXT); err != nil {
+		if err := packOSPackage(out, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, *createRootCert, acms); err != nil {
 			log.Fatal(err)
 		}
 	case sign.FullCommand():

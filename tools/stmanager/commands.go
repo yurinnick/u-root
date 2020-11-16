@@ -7,31 +7,15 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"path/filepath"
 
 	"github.com/u-root/u-root/pkg/boot/stboot"
 )
 
-func packOSPackage(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool, mac string) error {
-	var individual string
-	if mac != "" {
-		hwAddr, err := net.ParseMAC(mac)
-		if err != nil {
-			return err
-		}
-		individual = stboot.ComposeIndividualOSPackagePrefix(hwAddr)
-	}
-
-	ospkg, err := stboot.InitOSPackage(outDir, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert, acms, allowNonTXT)
+func packOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool) error {
+	ospkg, err := stboot.InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert, acms, allowNonTXT)
 	if err != nil {
 		return err
-	}
-
-	if individual != "" {
-		name := filepath.Base(ospkg.Archive)
-		name = individual + name
-		ospkg.Archive = filepath.Join(filepath.Dir(ospkg.Archive), name)
 	}
 
 	err = ospkg.Pack()

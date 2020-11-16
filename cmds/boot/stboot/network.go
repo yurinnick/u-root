@@ -275,19 +275,6 @@ func loadHTTPSCertificates() (*x509.CertPool, error) {
 	return roots, nil
 }
 
-func hostHWAddr() (net.HardwareAddr, error) {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return net.HardwareAddr{}, err
-	}
-	for _, i := range interfaces {
-		if i.Flags&net.FlagUp != 0 && bytes.Compare(i.HardwareAddr, nil) != 0 {
-			return i.HardwareAddr, nil
-		}
-	}
-	return net.HardwareAddr{}, fmt.Errorf("cannot find out hardware address")
-}
-
 func forceHTTPS(urls []string) error {
 	for n, raw := range urls {
 		url, err := url.Parse(raw)

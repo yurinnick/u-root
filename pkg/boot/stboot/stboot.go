@@ -4,11 +4,6 @@
 
 package stboot
 
-import (
-	"net"
-	"strings"
-)
-
 const (
 	// OSPackageExt is the file extension of OS packages
 	OSPackageExt string = ".zip"
@@ -18,10 +13,3 @@ const (
 	// ManifestName is the name of OS packages' internal configuration file
 	ManifestName string = "manifest.json"
 )
-
-// ComposeIndividualOSPackagePrefix returns a host specific name prefix for OS package files.
-func ComposeIndividualOSPackagePrefix(hwAddr net.HardwareAddr) string {
-	prefix := hwAddr.String()
-	prefix = strings.ReplaceAll(prefix, ":", "-")
-	return prefix + "-"
-}

@@ -83,7 +83,7 @@ func OSPackageFromArchive(archive string) (*OSPackage, error) {
 
 // InitOSPackage constructs a OSPackage from the parsed files. The underlying
 // tmporary directory is created with standardized paths and names.
-func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string, allowNonTXT bool) (*OSPackage, error) {
+func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string) (*OSPackage, error) {
 	var ospkg = &OSPackage{}
 
 	ospkg.Archive = out
@@ -95,7 +95,6 @@ func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, roo
 
 	m.Label = label
 	m.Cmdline = cmdline
-	m.AllowNonTXT = allowNonTXT
 	m.Write(dir)
 
 	ospkg.Dir = dir
@@ -281,10 +280,6 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 
 	if txt && ospkg.Manifest.Tboot == "" {
 		return nil, errors.New("OSPackage does not contain a TXT-ready configuration")
-	}
-
-	if !txt && !ospkg.Manifest.AllowNonTXT {
-		return nil, errors.New("OSPackage requires the use of TXT")
 	}
 
 	var osi boot.OSImage

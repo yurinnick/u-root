@@ -179,11 +179,11 @@ func main() {
 	////////////////
 	// TXT self test
 	////////////////
-	txtSupportedByHost = runTxtTests(*doDebug)
+	txtSupportedByHost = false
+	info("TXT self tests are not implementet yet.")
 	if !txtSupportedByHost {
-		info("WARNING: No TXT Support!")
+		info("TXT is supported on this platform")
 	}
-	info("TXT is supported on this platform")
 
 	////////////////
 	// Load OS package

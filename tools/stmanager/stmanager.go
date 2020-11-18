@@ -45,7 +45,7 @@ var (
 	signCertFile    = sign.Flag("cert", "Certificate corresponding to the private key").Required().ExistingFile()
 	signOSPackage   = sign.Arg("OS package", "Archive created by 'stconfig create'").Required().ExistingFile()
 
-	show          = kingpin.Command("sho", "Unpack OS package  file into directory")
+	show          = kingpin.Command("show", "Unpack OS package  file into directory")
 	showOSPackage = show.Arg("OS package", "Archive containing the boot files").Required().ExistingFile()
 )
 

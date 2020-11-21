@@ -15,13 +15,12 @@ type bootmode int
 
 // bootmodes values defines where to load a OS package from.
 const (
-	NetworkStatic bootmode = iota
-	NetworkDHCP
-	LocalStorage
+	Local bootmode = iota
+	Network
 )
 
-func (b bootmode) string() string {
-	return []string{"NetworkStatic", "NetworkDHCP", "LocalStorage"}[b]
+func (b bootmode) String() string {
+	return []string{"local", "network"}[b]
 }
 
 // SecurityConfig contains platform-specific data.

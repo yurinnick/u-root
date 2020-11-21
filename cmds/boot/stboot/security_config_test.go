@@ -13,7 +13,7 @@ import (
 func TestLoadSecurityConf(t *testing.T) {
 	h, err := loadSecurityConfig("testdata/security_configuration.json")
 	require.NoError(t, err)
-	require.Equal(t, LocalStorage, h.BootMode)
+	require.Equal(t, Local, h.BootMode)
 }
 
 func TestLoadSecurityConfigInvalid(t *testing.T) {

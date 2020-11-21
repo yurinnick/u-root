@@ -38,13 +38,6 @@ var (
 	txtSupportedByHost bool
 )
 
-type HostConfig struct {
-	HostIP           string   `json:"host_ip"`
-	DefaultGateway   string   `json:"gateway"`
-	DNSServer        string   `json:"dns"`
-	ProvisioningURLs []string `json:"provisioning_urls"`
-}
-
 // files at initramfs
 const (
 	securityConfigFile = "/etc/security_configuration.json"
@@ -127,7 +120,9 @@ func main() {
 		reboot("STDATA partition: %v", err)
 	}
 
-	// load host configuration
+	/////////////////////
+	// Host configuration
+	/////////////////////
 	p := filepath.Join(bootPartitionMountPoint, hostConfigurationFile)
 	bytes, err := ioutil.ReadFile(p)
 	if err != nil {
@@ -140,23 +135,6 @@ func main() {
 	if *doDebug {
 		str, _ := json.MarshalIndent(hc, "", "  ")
 		info("Host configuration: %s", str)
-	}
-
-	//////////
-	// Network
-	//////////
-	if sc.BootMode == NetworkStatic {
-		err = configureStaticNetwork()
-		if err != nil {
-			reboot("Cannot set up IO: %v", err)
-		}
-	}
-
-	if sc.BootMode == NetworkDHCP {
-		err = configureDHCPNetwork()
-		if err != nil {
-			reboot("Cannot set up IO: %v", err)
-		}
 	}
 
 	////////////////////
@@ -192,20 +170,20 @@ func main() {
 	var ospkgFiles []string
 
 	switch sc.BootMode {
-	case NetworkStatic, NetworkDHCP:
+	case Network:
 		f, err := loadOSPackageFromNetwork()
 		if err != nil {
-			reboot("error loading OS package: %v", err)
+			reboot("loading OS package failed: %v", err)
 		}
 		ospkgFiles = append(ospkgFiles, f)
-	case LocalStorage:
+	case Local:
 		ff, err := loadOSPackageFromLocalStorage()
 		if err != nil {
-			reboot("error loading OS package: %v", err)
+			reboot("loading OS package failed: %v", err)
 		}
 		ospkgFiles = append(ospkgFiles, ff...)
 	default:
-		reboot("unknown boot mode: %s", sc.BootMode.string())
+		reboot("unsupported boot mode: %s", sc.BootMode.String())
 	}
 	if len(ospkgFiles) == 0 {
 		reboot("No OS packages found")
@@ -274,7 +252,7 @@ func main() {
 			continue
 		}
 
-		if sc.BootMode == LocalStorage {
+		if sc.BootMode == Local {
 			markCurrentOSpkg(path)
 		}
 		break
@@ -374,17 +352,24 @@ func markCurrentOSpkg(file string) {
 }
 
 func loadOSPackageFromNetwork() (string, error) {
-	if err := forceHTTPS(hc.ProvisioningURLs); err != nil {
-		return "", fmt.Errorf("provisioning server URLs: %v", err)
+	info("Setting up network interface")
+	switch hc.NetworkMode {
+	case Static:
+		err := configureStaticNetwork()
+		if err != nil {
+			return "", fmt.Errorf("cannot set up IO: %v", err)
+		}
+	case DHCP:
+		err := configureDHCPNetwork()
+		if err != nil {
+			return "", fmt.Errorf("cannot set up IO: %v", err)
+		}
 	}
-
-	info("Try downloading OS package")
+	info("Downloading OS package")
 	dest, err := tryDownload(hc.ProvisioningURLs, stboot.DefaultOSPackageName)
 	if err != nil {
-		debug("%v", err)
-		return "", fmt.Errorf("cannot get %s from provisioning servers", stboot.DefaultOSPackageName)
+		return "", fmt.Errorf("loading %s from provisioning servers: %v", stboot.DefaultOSPackageName, err)
 	}
-
 	return dest, nil
 }
 

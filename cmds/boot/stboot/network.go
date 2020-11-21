@@ -32,12 +32,6 @@ const (
 	interfaceUpTimeout = 6 * time.Second
 )
 
-type netConf struct {
-	HostIP         string `json:"host_ip"`
-	DefaultGateway string `json:"gateway"`
-	DNSServer      string `json:"dns"`
-}
-
 func configureStaticNetwork() error {
 
 	if hc.HostIP == "" {
@@ -46,7 +40,7 @@ func configureStaticNetwork() error {
 	if hc.DefaultGateway == "" {
 		return errors.New("invald network configuration: missing default gateway")
 	}
-	info("Setup network configuration with IP: " + hc.HostIP)
+	info("Configure network interface with static IP: " + hc.HostIP)
 	addr, err := netlink.ParseAddr(hc.HostIP)
 	if err != nil {
 		return fmt.Errorf("error parsing HostIP string to CIDR format address: %v", err)
@@ -90,7 +84,7 @@ func configureStaticNetwork() error {
 }
 
 func configureDHCPNetwork() error {
-	info("Trying to configure network usinh...")
+	info("Configure network interface using DHCP")
 
 	links, err := findNetworkInterfaces()
 	if err != nil {
@@ -119,7 +113,7 @@ func configureDHCPNetwork() error {
 		if err != nil {
 			debug("%s: DHCP configuration error: %v", result.Interface.Attrs().Name, err)
 		} else {
-			info("%s: DHCP successful", result.Interface.Attrs().Name)
+			info("DHCP successful - %s", result.Interface.Attrs().Name)
 			return nil
 		}
 	}
@@ -177,7 +171,7 @@ func findNetworkInterfaces() ([]netlink.Link, error) {
 }
 
 func tryDownload(urls []string, file string) (dest string, err error) {
-	dest = filepath.Join("/root", file)
+	dest = filepath.Join("/", file)
 	for _, rawurl := range urls {
 		url, err := url.Parse(rawurl)
 		if err != nil {
@@ -273,18 +267,4 @@ func loadHTTPSCertificates() (*x509.CertPool, error) {
 		return roots, fmt.Errorf("error parsing %s", httpsRootsFile)
 	}
 	return roots, nil
-}
-
-func forceHTTPS(urls []string) error {
-	for n, raw := range urls {
-		url, err := url.Parse(raw)
-		if err != nil {
-			return err
-		}
-		if url.Scheme != "https" {
-			url.Scheme = "https"
-		}
-		urls[n] = url.String()
-	}
-	return nil
 }

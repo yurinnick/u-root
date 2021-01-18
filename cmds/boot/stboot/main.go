@@ -6,17 +6,13 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/stboot"
@@ -41,6 +37,7 @@ var (
 // files at initramfs
 const (
 	securityConfigFile = "/etc/security_configuration.json"
+	signingRootFile    = "/etc/ospkg_signing_root.pem"
 	httpsRootsFile     = "/etc/https_roots.pem"
 )
 
@@ -104,9 +101,15 @@ func main() {
 		str, _ := json.MarshalIndent(sc, "", "  ")
 		info("Security configuration: %s", str)
 	}
-	if len(sc.Fingerprints) == 0 {
-		reboot("No root certificate fingerprints found in security_configuration.json")
+
+	////////////////////////////
+	// Ssigning root certificate
+	////////////////////////////
+	signingRootPEM, err := ioutil.ReadFile(signingRootFile)
+	if err != nil {
+		reboot("Signing root certificate missing: %v", err)
 	}
+	debug("Signing Root: %s", string(signingRootPEM))
 
 	//////////////////////////////
 	// STBOOT and STDATA partition
@@ -207,18 +210,6 @@ func main() {
 			continue
 		}
 
-		//////////////////////////////////////////
-		// Validate OS package's root certificates
-		//////////////////////////////////////////
-		fp := calculateFingerprint(ospkg.RootCertPEM)
-		info("Fingerprint of OS package's root certificate:")
-		info(fp)
-		if !fingerprintIsValid(fp, sc.Fingerprints) {
-			debug("Root certificate of OS package does not match expacted fingerprint")
-			continue
-		}
-		info("OK!")
-
 		////////////////////
 		// Verify OS package
 		////////////////////
@@ -229,7 +220,7 @@ func main() {
 			info("Label: %s", ospkg.Manifest.Label)
 		}
 
-		n, valid, err := ospkg.Verify()
+		n, valid, err := ospkg.Verify(signingRootPEM)
 		if err != nil {
 			debug("Error verifying OS package: %v", err)
 			continue
@@ -397,30 +388,6 @@ func parseLocalBootOrder(bootOrderFile string) ([]string, error) {
 		return ret, err
 	}
 	return ret, nil
-}
-
-// fingerprintIsValid returns true if fpHex is equal to on of
-// those in expectedHex.
-func fingerprintIsValid(fpHex string, expectedHex []string) bool {
-	if len(expectedHex) == 0 {
-		return false
-	}
-	for _, f := range expectedHex {
-		f = strings.TrimSpace(f)
-		if fpHex == f {
-			return true
-		}
-	}
-	return false
-}
-
-// calculateFingerprint returns the SHA256 checksum of the
-// provided certificate.
-func calculateFingerprint(pemBytes []byte) string {
-	block, _ := pem.Decode(pemBytes)
-	fp := sha256.Sum256(block.Bytes)
-	str := hex.EncodeToString(fp[:])
-	return strings.TrimSpace(str)
 }
 
 //reboot trys to reboot the system in an infinity loop

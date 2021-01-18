@@ -12,8 +12,8 @@ import (
 	"github.com/u-root/u-root/pkg/boot/stboot"
 )
 
-func packOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string) error {
-	ospkg, err := stboot.InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert, acms)
+func packOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) error {
+	ospkg, err := stboot.InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, acms)
 	if err != nil {
 		return err
 	}

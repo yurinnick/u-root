@@ -37,7 +37,6 @@ var (
 	createCmdline   = create.Flag("cmd", "Kernel command line").String()
 	createTboot     = create.Flag("tboot", "Pre-execution module that sets up TXT").ExistingFile()
 	createTbootArgs = create.Flag("tcmd", "tboot command line").String()
-	createRootCert  = create.Flag("cert", "Root certificate of certificates used for signing").Required().ExistingFile()
 	createACM       = create.Flag("acm", "Authenticated Code Module for TXT. This can be a path to single ACM or directory containig multiple ACMs.").ExistingFileOrDir()
 
 	sign            = kingpin.Command("sign", "Sign the binary inside the provided OS package")
@@ -68,7 +67,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		if err := packOSPackage(out, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, *createRootCert, acms); err != nil {
+		if err := packOSPackage(out, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, acms); err != nil {
 			log.Fatal(err)
 		}
 	case sign.FullCommand():

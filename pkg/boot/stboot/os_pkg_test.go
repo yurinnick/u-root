@@ -17,7 +17,6 @@ func TestCreateFileTree(t *testing.T) {
 	kernel := "testdata/files/kernel"
 	initramfs := "testdata/files/initramfs"
 	tboot := "testdata/files/tboot"
-	cert := "testdata/files/cert"
 	acm1 := "testdata/files/acm1"
 	acm2 := "testdata/files/acm2"
 	acm3 := "testdata/files/acm3"
@@ -25,7 +24,6 @@ func TestCreateFileTree(t *testing.T) {
 	kernelRelPath := filepath.Join(bootfilesDir, filepath.Base(kernel))
 	initramfsRelPath := filepath.Join(bootfilesDir, filepath.Base(initramfs))
 	tbootRelPath := filepath.Join(bootfilesDir, filepath.Base(tboot))
-	certRelPath := rootCertPath
 	acm1RelPath := filepath.Join(acmDir, filepath.Base(acm1))
 	acm2RelPath := filepath.Join(acmDir, filepath.Base(acm2))
 	acm3RelPath := filepath.Join(acmDir, filepath.Base(acm3))
@@ -37,12 +35,11 @@ func TestCreateFileTree(t *testing.T) {
 		ACMs:      []string{acm1RelPath, acm2RelPath, acm3RelPath},
 	}
 
-	dir, cfg, err := createFileTree(kernel, initramfs, tboot, cert, []string{acm1, acm2, acm3})
+	dir, cfg, err := createFileTree(kernel, initramfs, tboot, []string{acm1, acm2, acm3})
 	require.NoError(t, err)
 	require.FileExists(t, filepath.Join(dir, kernelRelPath))
 	require.FileExists(t, filepath.Join(dir, initramfsRelPath))
 	require.FileExists(t, filepath.Join(dir, tbootRelPath))
-	require.FileExists(t, filepath.Join(dir, certRelPath))
 	require.FileExists(t, filepath.Join(dir, acm1RelPath))
 	require.FileExists(t, filepath.Join(dir, acm2RelPath))
 	require.FileExists(t, filepath.Join(dir, acm3RelPath))
@@ -56,11 +53,10 @@ func TestCreateFileTreeFail(t *testing.T) {
 	kernel := "wrong/path/kernel"
 	initramfs := "testdata/files/initramfs"
 	preexec := "testdata/files/preexec"
-	cert := "testdata/files/cert"
 	acm1 := "testdata/files/acm1"
 	acm2 := "testdata/files/acm2"
 	acm3 := "testdata/files/acm3"
-	dir, _, err := createFileTree(kernel, initramfs, preexec, cert, []string{acm1, acm2, acm3})
+	dir, _, err := createFileTree(kernel, initramfs, preexec, []string{acm1, acm2, acm3})
 	require.Error(t, err)
 	require.NoDirExists(t, dir)
 }

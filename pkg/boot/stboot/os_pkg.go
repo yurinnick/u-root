@@ -25,7 +25,6 @@ const (
 	bootfilesDir  string = "boot"
 	acmDir        string = "boot/acms"
 	signaturesDir string = "signatures"
-	rootCertPath  string = "signatures/root.cert"
 )
 
 // OSPackage contains data to operate on the system transparency
@@ -36,7 +35,6 @@ type OSPackage struct {
 	Dir               string
 	Manifest          *OSManifest
 	FilesToBeMeasured []string
-	RootCertPEM       []byte
 	Signatures        []Signature
 	NumSignatures     int
 	HashValue         []byte
@@ -83,12 +81,12 @@ func OSPackageFromArchive(archive string) (*OSPackage, error) {
 
 // InitOSPackage constructs a OSPackage from the parsed files. The underlying
 // tmporary directory is created with standardized paths and names.
-func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, rootCert string, acms []string) (*OSPackage, error) {
+func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) (*OSPackage, error) {
 	var ospkg = &OSPackage{}
 
 	ospkg.Archive = out
 
-	dir, m, err := createFileTree(kernel, initramfs, tboot, rootCert, acms)
+	dir, m, err := createFileTree(kernel, initramfs, tboot, acms)
 	if err != nil {
 		return nil, fmt.Errorf("OSPackage: creating standard file tree faild: %v", err)
 	}
@@ -109,13 +107,7 @@ func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, roo
 }
 
 func (ospkg *OSPackage) init() error {
-	certPEM, err := ioutil.ReadFile(filepath.Join(ospkg.Dir, rootCertPath))
-	if err != nil {
-		return fmt.Errorf("OSPackage: reading root certificate faild: %v", err)
-	}
-	ospkg.RootCertPEM = certPEM
-
-	err = ospkg.getFilesToBeHashed()
+	err := ospkg.getFilesToBeHashed()
 	if err != nil {
 		return fmt.Errorf("OSPackage: collecting files for measurement failed: %v", err)
 	}
@@ -183,11 +175,6 @@ func (ospkg *OSPackage) Sign(privKeyFile, certFile string) error {
 		return err
 	}
 
-	err = validateCertificate(cert, ospkg.RootCertPEM)
-	if err != nil {
-		return err
-	}
-
 	if ospkg.HashValue == nil {
 		err = ospkg.Hash()
 		if err != nil {
@@ -226,12 +213,13 @@ func (ospkg *OSPackage) Sign(privKeyFile, certFile string) error {
 }
 
 // Verify first validates the certificates stored together with the signatures
-// and the verifies the signatures. The number of found signatures and the
-// number of valid signatures are returned. A signature is valid if:
-// * Its certificate was signed by ospkgs's root certificate
+// against the provided root certificate and then verifies the signatures.
+// The number of found signatures and the number of valid signatures are returned.
+// A signature is valid if:
+// * Its certificate was signed by the root certificate
 // * Verification is passed
-// * No previous signature has the same certificate
-func (ospkg *OSPackage) Verify() (found, verified int, err error) {
+// * Its certificate is not a duplicate of a previous one
+func (ospkg *OSPackage) Verify(rootCertPEM []byte) (found, verified int, err error) {
 	if ospkg.HashValue == nil {
 		err := ospkg.Hash()
 		if err != nil {
@@ -244,7 +232,7 @@ func (ospkg *OSPackage) Verify() (found, verified int, err error) {
 	var certsUsed []*x509.Certificate
 	for i, sig := range ospkg.Signatures {
 		found++
-		err := validateCertificate(sig.Cert, ospkg.RootCertPEM)
+		err := ValidateCertificate(sig.Cert, rootCertPEM)
 		if err != nil {
 			log.Printf("skip signature %d: invalid certificate: %v", i+1, err)
 			continue
@@ -323,10 +311,9 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 	return osi, nil
 }
 
-// getFilesToBeHashed evaluates the paths of the OSPackage' files that are
+// getFilesToBeHashed evaluates the paths of the OSPackage's files that are
 // supposed to be hashed for signing and varifiaction. These are:
 // * manifest.json
-// * root.cert
 // * files defined in manifest.json if they are present
 func (ospkg *OSPackage) getFilesToBeHashed() error {
 	var f []string
@@ -334,7 +321,6 @@ func (ospkg *OSPackage) getFilesToBeHashed() error {
 	// these files must be present
 	config := filepath.Join(ospkg.Dir, ManifestName)
 	kernel := filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)
-	rootCert := filepath.Join(ospkg.Dir, rootCertPath)
 	_, err := os.Stat(config)
 	if err != nil {
 		return errors.New("files to be measured: missing manifest.json")
@@ -343,11 +329,7 @@ func (ospkg *OSPackage) getFilesToBeHashed() error {
 	if err != nil {
 		return errors.New("files to be measured: missing kernel")
 	}
-	_, err = os.Stat(rootCert)
-	if err != nil {
-		return errors.New("files to be measured: missing root certificate")
-	}
-	f = append(f, config, kernel, rootCert)
+	f = append(f, config, kernel)
 
 	// following files are measured if present
 	if ospkg.Manifest.Initramfs != "" {
@@ -418,7 +400,7 @@ func (ospkg *OSPackage) getSignatures() error {
 // createFileTree copies the provided files to a well known tree inside
 // the OSPackage's underlying tmpDir. The created tmpDir and a manifest
 // initialized with corresponding paths is retruned.
-func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (dir string, m OSManifest, err error) {
+func createFileTree(kernel, initramfs, tboot string, acms []string) (dir string, m OSManifest, err error) {
 	dir, err = ioutil.TempDir(os.TempDir(), "os-package")
 	if err != nil {
 		return
@@ -434,6 +416,7 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 	// Kernel
 	if kernel == "" {
 		err = errors.New("kernel missing")
+		return
 	}
 	rel = filepath.Join(bootfilesDir, filepath.Base(kernel))
 	dst = filepath.Join(dir, rel)
@@ -462,15 +445,6 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 		m.Tboot = rel
 	}
 
-	// Root Certificate
-	if rootCert == "" {
-		err = errors.New("root certificate missing")
-	}
-	dst = filepath.Join(dir, rootCertPath)
-	if err = CreateAndCopy(rootCert, dst); err != nil {
-		return
-	}
-
 	// ACMs
 	if len(acms) > 0 {
 		for _, acm := range acms {
@@ -481,6 +455,12 @@ func createFileTree(kernel, initramfs, tboot, rootCert string, acms []string) (d
 			}
 			m.ACMs = append(m.ACMs, rel)
 		}
+	}
+
+	// signatures folder
+	p := filepath.Join(dir, signaturesDir)
+	if err = os.MkdirAll(p, os.ModePerm); err != nil {
+		return
 	}
 
 	return

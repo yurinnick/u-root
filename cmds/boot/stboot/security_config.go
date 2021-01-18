@@ -27,8 +27,6 @@ func (b bootmode) String() string {
 type SecurityConfig struct {
 	// MinimalSignaturesMatch is the min number of signatures that must pass validation.
 	MinimalSignaturesMatch int `json:"minimal_signatures_match"`
-	// Fingerprints are used to validate the root certificate insinde the OS package.
-	Fingerprints []string `json:"fingerprints"`
 	//BootMode
 	BootMode bootmode `json:"boot_mode"`
 }

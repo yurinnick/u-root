@@ -171,9 +171,9 @@ func certPool(pem []byte) (*x509.CertPool, error) {
 	return certPool, nil
 }
 
-// validateCertificate validates cert against certPool. If cert is not signed
+// ValidateCertificate validates cert against certPool. If cert is not signed
 // by a certificate of certPool an error is returned.
-func validateCertificate(cert *x509.Certificate, rootCertPEM []byte) error {
+func ValidateCertificate(cert *x509.Certificate, rootCertPEM []byte) error {
 	certPool, err := certPool(rootCertPEM)
 	if err != nil {
 		return err

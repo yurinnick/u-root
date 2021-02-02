@@ -9,7 +9,6 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha512"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -61,24 +60,13 @@ func (s *Signature) Write(dir string) error {
 
 // Signer is used by OSPackage to hash, sign and varify the OSPackage.
 type Signer interface {
-	Hash(files ...string) ([]byte, error)
 	Sign(privKey string, data []byte) ([]byte, error)
-	Verify(sig Signature, hash []byte) error
+	Verify(sig, hash []byte, cert *x509.Certificate) error
 }
 
 // DummySigner implements the Signer interface. It creates signatures
 // that are always valid.
 type DummySigner struct{}
-
-// Hash returns a hash value of just 8 random bytes.
-func (DummySigner) Hash(files ...string) ([]byte, error) {
-	hash := make([]byte, 8)
-	_, err := rand.Read(hash)
-	if err != nil {
-		return nil, err
-	}
-	return hash, nil
-}
 
 // Sign returns a signature containing just 8 random bytes.
 func (DummySigner) Sign(privKey string, data []byte) ([]byte, error) {
@@ -91,29 +79,13 @@ func (DummySigner) Sign(privKey string, data []byte) ([]byte, error) {
 }
 
 // Verify will never return an error.
-func (DummySigner) Verify(sig Signature, hash []byte) error {
+func (DummySigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
 	return nil
 }
 
 // Sha512PssSigner implements the Signer interface. It uses SHA512 hashes
 // and PSS signatures along with x509 certificates.
 type Sha512PssSigner struct{}
-
-// Hash returns the a SHA512 hash value of the provided files.
-func (Sha512PssSigner) Hash(files ...string) ([]byte, error) {
-	h := sha512.New()
-	for _, file := range files {
-		buf, err := ioutil.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-		_, err = h.Write(buf)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return h.Sum(nil), nil
-}
 
 // Sign signes the provided data with the key named by privKey. The returned
 // byte slice contains a PSS signature value.
@@ -135,7 +107,7 @@ func (Sha512PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 
 	opts := &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}
 
-	sig, err := rsa.SignPSS(rand.Reader, key, crypto.SHA512, data, opts)
+	sig, err := rsa.SignPSS(rand.Reader, key, crypto.SHA256, data, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +118,9 @@ func (Sha512PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 }
 
 // Verify checks if sig contains a valid signature of hash.
-func (Sha512PssSigner) Verify(sig Signature, hash []byte) error {
+func (Sha512PssSigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
 	opts := &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}
-	err := rsa.VerifyPSS(sig.Cert.PublicKey.(*rsa.PublicKey), crypto.SHA512, hash, sig.Bytes, opts)
+	err := rsa.VerifyPSS(cert.PublicKey.(*rsa.PublicKey), crypto.SHA512, hash, sig, opts)
 	if err != nil {
 		return fmt.Errorf("signature verification failed: %v", err)
 	}

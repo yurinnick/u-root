@@ -5,15 +5,15 @@
 package main
 
 import (
-	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 
 	"github.com/u-root/u-root/pkg/boot/stboot"
 )
 
-func packOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) error {
-	ospkg, err := stboot.InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs, acms)
+func packOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) error {
+	ospkg, err := stboot.InitOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs, acms)
 	if err != nil {
 		return err
 	}
@@ -23,9 +23,9 @@ func packOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs stri
 		return err
 	}
 
-	fmt.Println(filepath.Base(ospkg.Archive))
-	return ospkg.Clean()
-
+	newArchive := filepath.Base(ospkg.Archive)
+	os.Stdout.WriteString(newArchive)
+	return nil
 }
 
 func addSignatureToOSPackage(osPackage, privKey, cert string) error {
@@ -46,8 +46,8 @@ func addSignatureToOSPackage(osPackage, privKey, cert string) error {
 		return err
 	}
 
-	log.Printf("Signatures included: %d", ospkg.NumSignatures)
-	return ospkg.Clean()
+	log.Printf("Signatures included: %d", len(ospkg.Descriptor.Signatures))
+	return nil
 }
 
 func unpackOSPackage(ospkgPath string) error {
@@ -56,6 +56,6 @@ func unpackOSPackage(ospkgPath string) error {
 		return err
 	}
 
-	log.Println("Archive unpacked into: " + ospkg.Dir)
+	log.Println("Archive unpacked into: " + ospkg.Archive)
 	return nil
 }

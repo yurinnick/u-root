@@ -5,6 +5,9 @@
 package stboot
 
 import (
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -17,8 +20,6 @@ import (
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/multiboot"
-	"github.com/u-root/u-root/pkg/uio"
-	"github.com/u-root/u-root/pkg/uzip"
 )
 
 const (
@@ -27,132 +28,268 @@ const (
 	signaturesDir string = "signatures"
 )
 
-// OSPackage contains data to operate on the system transparency
-// OSPackage archive. There is an underlying temporary directory
-// representing the extracted archive.
+// OSPackage represents an OS package ZIP archive and and related data.
 type OSPackage struct {
-	Archive           string
-	Dir               string
-	Manifest          *OSManifest
-	FilesToBeMeasured []string
-	Signatures        []Signature
-	NumSignatures     int
-	HashValue         []byte
-	Signer            Signer
+	Archive    string
+	Raw        []byte
+	Manifest   *OSManifest
+	Kernel     []byte
+	Initramfs  []byte
+	Tboot      []byte
+	ACMs       [][]byte
+	Descriptor *Descriptor
+	HashValue  [32]byte
+	Signer     Signer
 }
 
-// OSPackageFromArchive constructs a OSPackage from a zip file at archive.
-func OSPackageFromArchive(archive string) (*OSPackage, error) {
-	var ospkg = &OSPackage{}
-
-	if _, err := os.Stat(archive); err != nil {
-		return nil, fmt.Errorf("OSPackage: %v", err)
+// InitOSPackage constructs a OSPackage from the passed files.
+func InitOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) (*OSPackage, error) {
+	var m = &OSManifest{
+		Version:   ManifestVersion,
+		Label:     label,
+		Cmdline:   cmdline,
+		TbootArgs: tbootArgs,
 	}
 
-	dir, err := ioutil.TempDir("", "os-package")
-	if err != nil {
-		return nil, fmt.Errorf("OSPackage: cannot create tmp dir: %v", err)
+	var d = &Descriptor{
+		Version: DescriptorVersion,
+		PkgURL:  pkgURL,
 	}
 
-	err = uzip.FromZip(archive, dir)
-	if err != nil {
-		return nil, fmt.Errorf("OSPackage: cannot unzip %s: %v", archive, err)
+	var ospkg = &OSPackage{
+		Archive:    out,
+		Manifest:   m,
+		Descriptor: d,
+		Signer:     Sha512PssSigner{},
 	}
 
-	m, err := OSManifestFromFile(filepath.Join(dir, ManifestName))
-	if err != nil {
-		return nil, fmt.Errorf("OSPackage: getting configuration faild: %v", err)
-	}
-	if err = m.Validate(); err != nil {
-		return nil, fmt.Errorf("OSPackage: invalid config: %v", err)
+	ospkg.Kernel, _ = ioutil.ReadFile(kernel)
+	if ospkg.Kernel != nil {
+		ospkg.Manifest.KernelPath = filepath.Join(bootfilesDir, filepath.Base(kernel))
 	}
 
-	ospkg.Archive = archive
-	ospkg.Dir = dir
-	ospkg.Manifest = m
-
-	err = ospkg.init()
-	if err != nil {
-		return ospkg, err
+	ospkg.Initramfs, _ = ioutil.ReadFile(initramfs)
+	if ospkg.Initramfs != nil {
+		ospkg.Manifest.InitramfsPath = filepath.Join(bootfilesDir, filepath.Base(initramfs))
 	}
 
-	return ospkg, nil
-}
-
-// InitOSPackage constructs a OSPackage from the parsed files. The underlying
-// tmporary directory is created with standardized paths and names.
-func InitOSPackage(out, label, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) (*OSPackage, error) {
-	var ospkg = &OSPackage{}
-
-	ospkg.Archive = out
-
-	dir, m, err := createFileTree(kernel, initramfs, tboot, acms)
-	if err != nil {
-		return nil, fmt.Errorf("OSPackage: creating standard file tree faild: %v", err)
+	ospkg.Tboot, _ = ioutil.ReadFile(tboot)
+	if ospkg.Tboot != nil {
+		ospkg.Manifest.TbootPath = filepath.Join(bootfilesDir, filepath.Base(tboot))
 	}
 
-	m.Label = label
-	m.Cmdline = cmdline
-	m.Write(dir)
+	for _, acm := range acms {
+		a, _ := ioutil.ReadFile(acm)
+		if a != nil {
+			ospkg.ACMs = append(ospkg.ACMs, a)
+			name := filepath.Join(acmDir, filepath.Base(acm))
+			ospkg.Manifest.ACMPaths = append(ospkg.Manifest.ACMPaths, name)
+		}
+	}
 
-	ospkg.Dir = dir
-	ospkg.Manifest = &m
-
-	err = ospkg.init()
-	if err != nil {
+	if err := ospkg.Validate(); err != nil {
 		return nil, err
 	}
 
 	return ospkg, nil
 }
 
-func (ospkg *OSPackage) init() error {
-	err := ospkg.getFilesToBeHashed()
-	if err != nil {
-		return fmt.Errorf("OSPackage: collecting files for measurement failed: %v", err)
+// OSPackageFromArchive constructs a OSPackage from a zip file at archive.
+func OSPackageFromArchive(name string) (*OSPackage, error) {
+	ext := filepath.Ext(name)
+	if ext != OSPackageExt && ext != DescriptorExt {
+		return nil, fmt.Errorf("os package: invalid file extension %s", ext)
 	}
 
-	ospkg.Signer = Sha512PssSigner{}
+	name = strings.TrimSuffix(name, ext)
+	archivePath := name + OSPackageExt
+	descriptorPath := name + DescriptorExt
 
-	err = ospkg.getSignatures()
+	// descriptor
+	descriptor, err := DescriptorFromFile(descriptorPath)
 	if err != nil {
-		return fmt.Errorf("OSPackage: getting signatures: %v", err)
+		if err != nil {
+			return nil, fmt.Errorf("os package: %v", err)
+		}
 	}
 
-	ospkg.NumSignatures = len(ospkg.Signatures)
-	return nil
+	if err = descriptor.Validate(); err != nil {
+		return nil, fmt.Errorf("os package: invalid descriptor: %v", err)
+	}
+
+	ospkg := &OSPackage{
+		Archive:    archivePath,
+		Descriptor: descriptor,
+		Signer:     Sha512PssSigner{},
+	}
+
+	ospkg.Raw, err = ioutil.ReadFile(archivePath)
+	if err != nil {
+		return nil, fmt.Errorf("os package: opening archive failed: %v", err)
+	}
+
+	ospkg.HashValue, err = calculateHash(ospkg.Raw)
+	if err != nil {
+		return nil, fmt.Errorf("os package: calculate hash failed: %v", err)
+	}
+
+	// open archive
+	reader := bytes.NewReader(ospkg.Raw)
+	size := int64(len(ospkg.Raw))
+	archive, err := zip.NewReader(reader, size)
+	if err != nil {
+		return nil, fmt.Errorf("os package: zip reader failed: %v", err)
+	}
+
+	// manifest
+	m, err := unzipFile(archive, ManifestName)
+	if err != nil {
+		return nil, fmt.Errorf("os package: unzip failed: %v", err)
+	}
+	ospkg.Manifest, err = OSManifestFromBytes(m)
+	if err != nil {
+		return nil, fmt.Errorf("os package: %v", err)
+	}
+
+	if err = ospkg.Manifest.Validate(); err != nil {
+		return nil, fmt.Errorf("os package: invalid manifest: %v", err)
+	}
+
+	// kernel
+	ospkg.Kernel, err = unzipFile(archive, ospkg.Manifest.KernelPath)
+	if err != nil {
+		return nil, fmt.Errorf("os package: %v", err)
+	}
+
+	// initramfs
+	ospkg.Initramfs, err = unzipFile(archive, ospkg.Manifest.InitramfsPath)
+	if err != nil {
+		return nil, fmt.Errorf("os package: %v", err)
+	}
+
+	// kernel
+	ospkg.Tboot, err = unzipFile(archive, ospkg.Manifest.TbootPath)
+	if err != nil {
+		return nil, fmt.Errorf("os package: %v", err)
+	}
+
+	// ACMs
+	if len(ospkg.Manifest.ACMPaths) > 0 {
+		for _, acm := range ospkg.Manifest.ACMPaths {
+			a, err := unzipFile(archive, acm)
+			if err != nil {
+				return nil, fmt.Errorf("os package: %v", err)
+			}
+			ospkg.ACMs = append(ospkg.ACMs, a)
+		}
+	}
+
+	return ospkg, nil
 }
 
-// Clean removes the underlying temporary directory.
-func (ospkg *OSPackage) Clean() error {
-	err := os.RemoveAll(ospkg.Dir)
-	if err != nil {
-		return err
-	}
-	ospkg.Dir = ""
-	return nil
-}
-
-// Pack archives the all contents of the underlying temporary
-// directory using zip.
-func (ospkg *OSPackage) Pack() error {
+func (ospkg *OSPackage) Validate() error {
+	// Archive path
 	if ospkg.Archive == "" {
-		return errors.New("Booospkg.Archive is not set")
+		return fmt.Errorf("os package: missing archive path")
+	} else if filepath.Ext(ospkg.Archive) != OSPackageExt {
+		return fmt.Errorf("os package: archive path must end with .zip extension")
 	}
-	if ospkg.Dir == "" {
-		return errors.New("Cannot locate underlying directory")
+
+	// Manifest
+	if ospkg.Manifest == nil {
+		return fmt.Errorf("os package: missing manifest data")
+	} else if err := ospkg.Manifest.Validate(); err != nil {
+		return fmt.Errorf("os package: %v", err)
 	}
-	return uzip.ToZip(ospkg.Dir, ospkg.Archive)
+
+	// Descriptor
+	if ospkg.Descriptor == nil {
+		return fmt.Errorf("os package: missing descriptor data")
+	} else if err := ospkg.Descriptor.Validate(); err != nil {
+		return fmt.Errorf("os package: %v", err)
+	}
+
+	// Kernel
+	if len(ospkg.Kernel) == 0 {
+		return fmt.Errorf("os package: missing kernel")
+	}
+
+	return nil
 }
 
-// Hash calculates hashes of all boot configurations in OSPackage using the
-// OSPackage.Signer's hash function.
-func (ospkg *OSPackage) Hash() error {
-	hash, err := ospkg.Signer.Hash(ospkg.FilesToBeMeasured...)
+// Pack archives the contents of ospkg using zip.
+func (ospkg *OSPackage) Pack() error {
+	zipfile, err := os.Create(ospkg.Archive)
 	if err != nil {
-		return err
+		return fmt.Errorf("os package: creating ZIP failed: %v", err)
 	}
-	ospkg.HashValue = hash
+	defer zipfile.Close()
+
+	archive := zip.NewWriter(zipfile)
+	defer archive.Close()
+
+	// directories
+	if err = zipDir(archive, bootfilesDir); err != nil {
+		return fmt.Errorf("os package: creating dir failed: %v", err)
+	}
+	if len(ospkg.ACMs) > 0 {
+		if err = zipDir(archive, acmDir); err != nil {
+			return fmt.Errorf("os package: creating dir failed: %v", err)
+		}
+	}
+
+	// kernel
+	name := ospkg.Manifest.KernelPath
+	if err := zipFile(archive, name, ospkg.Kernel); err != nil {
+		return fmt.Errorf("OS package: writing kernel failed: %v", err)
+	}
+
+	// initramfs
+	if len(ospkg.Initramfs) > 0 {
+		name = ospkg.Manifest.InitramfsPath
+		if err := zipFile(archive, name, ospkg.Initramfs); err != nil {
+			return fmt.Errorf("OS package: writing initramfs failed: %v", err)
+		}
+	}
+
+	// tboot
+	if len(ospkg.Tboot) > 0 {
+		name = ospkg.Manifest.TbootPath
+		if err := zipFile(archive, name, ospkg.Tboot); err != nil {
+			return fmt.Errorf("OS package: writing tboot failed: %v", err)
+		}
+	}
+
+	// ACMs
+	if len(ospkg.ACMs) > 0 {
+		for i, acm := range ospkg.ACMs {
+			name = ospkg.Manifest.ACMPaths[i]
+			if err := zipFile(archive, name, acm); err != nil {
+				return fmt.Errorf("OS package: writing ACMs failed: %v", err)
+			}
+		}
+	}
+
+	// manifest
+	mbytes, err := ospkg.Manifest.Bytes()
+	if err != nil {
+		return fmt.Errorf("OS package: serializing manifest failed: %v", err)
+	}
+	if err := zipFile(archive, ManifestName, mbytes); err != nil {
+		return fmt.Errorf("OS package: writing manifest failed: %v", err)
+	}
+
+	// descriptor
+	dbytes, err := ospkg.Descriptor.Bytes()
+	if err != nil {
+		return fmt.Errorf("OS package: serializing descriptor failed: %v", err)
+	}
+	name = strings.Replace(ospkg.Archive, filepath.Ext(ospkg.Archive), DescriptorExt, -1)
+
+	if err = ioutil.WriteFile(name, dbytes, 0666); err != nil {
+		return fmt.Errorf("OS package: writing descriptor file failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -165,81 +302,69 @@ func (ospkg *OSPackage) Sign(privKeyFile, certFile string) error {
 		return err
 	}
 
-	buf, err := ioutil.ReadFile(certFile)
+	certBytes, err := ioutil.ReadFile(certFile)
 	if err != nil {
 		return err
 	}
 
-	cert, err := parseCertificate(buf)
+	cert, err := parseCertificate(certBytes)
 	if err != nil {
 		return err
 	}
 
-	if ospkg.HashValue == nil {
-		err = ospkg.Hash()
-		if err != nil {
-			return err
-		}
+	ospkg.HashValue, err = calculateHash(ospkg.Raw)
+	if err != nil {
+		return err
 	}
 
 	// check for dublicate certificates
-	for _, sig := range ospkg.Signatures {
-		if sig.Cert.Equal(cert) {
+	for _, certBytes := range ospkg.Descriptor.Certificates {
+		storedCert, err := parseCertificate(certBytes)
+		if err != nil {
+			return err
+		}
+		if storedCert.Equal(cert) {
 			return fmt.Errorf("certificate has already been used: %v", certFile)
 		}
 	}
+
 	// sign with private key
-	s, err := ospkg.Signer.Sign(privKeyFile, ospkg.HashValue)
+	sig, err := ospkg.Signer.Sign(privKeyFile, ospkg.HashValue[:])
 	if err != nil {
-		return err
-	}
-	sig := Signature{
-		Bytes: s,
-		Cert:  cert}
-	// check certificate's public key
-	err = ospkg.Signer.Verify(sig, ospkg.HashValue)
-	if err != nil {
-		return fmt.Errorf("public key in %s does not match the private key %s", filepath.Base(certFile), filepath.Base(privKeyFile))
-	}
-	// save
-	ospkg.Signatures = append(ospkg.Signatures, sig)
-	dir := filepath.Join(ospkg.Dir, signaturesDir)
-	if err = sig.Write(dir); err != nil {
-		return err
+		return fmt.Errorf("signing failed: %v", err)
 	}
 
-	ospkg.NumSignatures++
+	ospkg.Descriptor.Certificates = append(ospkg.Descriptor.Certificates, certBytes)
+	ospkg.Descriptor.Signatures = append(ospkg.Descriptor.Signatures, sig)
 	return nil
 }
 
 // Verify first validates the certificates stored together with the signatures
-// against the provided root certificate and then verifies the signatures.
+// in the os package descriptor against the provided root certificate and then
+// verifies the signatures.
 // The number of found signatures and the number of valid signatures are returned.
 // A signature is valid if:
 // * Its certificate was signed by the root certificate
-// * Verification is passed
+// * It passed verification
 // * Its certificate is not a duplicate of a previous one
-func (ospkg *OSPackage) Verify(rootCertPEM []byte) (found, verified int, err error) {
-	if ospkg.HashValue == nil {
-		err := ospkg.Hash()
-		if err != nil {
-			return 0, 0, err
-		}
-	}
-
+func (ospkg *OSPackage) Verify(rootCertPEM []byte) (found, valid int, err error) {
 	found = 0
-	verified = 0
+	valid = 0
 	var certsUsed []*x509.Certificate
-	for i, sig := range ospkg.Signatures {
+	for i, sig := range ospkg.Descriptor.Signatures {
 		found++
-		err := ValidateCertificate(sig.Cert, rootCertPEM)
+		cert, err := parseCertificate(ospkg.Descriptor.Certificates[i])
+		if err != nil {
+			return 0, 0, fmt.Errorf("verify: certificate %d: parsing failed: %v", i, err)
+		}
+		err = ValidateCertificate(cert, rootCertPEM)
 		if err != nil {
 			log.Printf("skip signature %d: invalid certificate: %v", i+1, err)
 			continue
 		}
 		var dublicate bool
 		for _, c := range certsUsed {
-			if c.Equal(sig.Cert) {
+			if c.Equal(cert) {
 				dublicate = true
 				break
 			}
@@ -248,15 +373,15 @@ func (ospkg *OSPackage) Verify(rootCertPEM []byte) (found, verified int, err err
 			log.Printf("skip signature %d: dublicate", i+1)
 			continue
 		}
-		certsUsed = append(certsUsed, sig.Cert)
-		err = ospkg.Signer.Verify(sig, ospkg.HashValue)
+		certsUsed = append(certsUsed, cert)
+		err = ospkg.Signer.Verify(sig, ospkg.HashValue[:], cert)
 		if err != nil {
 			log.Printf("skip signature %d: verification failed: %v", i+1, err)
 			continue
 		}
-		verified++
+		valid++
 	}
-	return found, verified, nil
+	return found, valid, nil
 }
 
 // OSImage retunrns a boot.OSImage generated from ospkg's configuration
@@ -266,7 +391,7 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 		return nil, err
 	}
 
-	if txt && ospkg.Manifest.Tboot == "" {
+	if txt && ospkg.Manifest.TbootPath == "" {
 		return nil, errors.New("OSPackage does not contain a TXT-ready configuration")
 	}
 
@@ -274,8 +399,8 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 	if !txt {
 		osi = &boot.LinuxImage{
 			Name:    ospkg.Manifest.Label,
-			Kernel:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)),
-			Initrd:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Initramfs)),
+			Kernel:  bytes.NewReader(ospkg.Kernel),
+			Initrd:  bytes.NewReader(ospkg.Initramfs),
 			Cmdline: ospkg.Manifest.Cmdline,
 		}
 		return osi, nil
@@ -283,20 +408,20 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 
 	var modules []multiboot.Module
 	kernel := multiboot.Module{
-		Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)),
+		Module:  bytes.NewReader(ospkg.Kernel),
 		Cmdline: "OS-Kernel " + ospkg.Manifest.Cmdline,
 	}
 	modules = append(modules, kernel)
 
 	initramfs := multiboot.Module{
-		Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Initramfs)),
+		Module:  bytes.NewReader(ospkg.Initramfs),
 		Cmdline: "OS-Initramfs",
 	}
 	modules = append(modules, initramfs)
 
-	for n, a := range ospkg.Manifest.ACMs {
+	for n, a := range ospkg.ACMs {
 		acm := multiboot.Module{
-			Module:  uio.NewLazyFile(filepath.Join(ospkg.Dir, a)),
+			Module:  bytes.NewReader(a),
 			Cmdline: fmt.Sprintf("ACM%d", n+1),
 		}
 		modules = append(modules, acm)
@@ -304,191 +429,51 @@ func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
 
 	osi = &boot.MultibootImage{
 		Name:    ospkg.Manifest.Label,
-		Kernel:  uio.NewLazyFile(filepath.Join(ospkg.Dir, ospkg.Manifest.Tboot)),
+		Kernel:  bytes.NewReader(ospkg.Tboot),
 		Cmdline: ospkg.Manifest.TbootArgs,
 		Modules: modules,
 	}
 	return osi, nil
 }
 
-// getFilesToBeHashed evaluates the paths of the OSPackage's files that are
-// supposed to be hashed for signing and varifiaction. These are:
-// * manifest.json
-// * files defined in manifest.json if they are present
-func (ospkg *OSPackage) getFilesToBeHashed() error {
-	var f []string
-
-	// these files must be present
-	config := filepath.Join(ospkg.Dir, ManifestName)
-	kernel := filepath.Join(ospkg.Dir, ospkg.Manifest.Kernel)
-	_, err := os.Stat(config)
-	if err != nil {
-		return errors.New("files to be measured: missing manifest.json")
+func zipDir(archive *zip.Writer, name string) error {
+	if name[len(name)-1:] != "/" {
+		name += "/"
 	}
-	_, err = os.Stat(kernel)
-	if err != nil {
-		return errors.New("files to be measured: missing kernel")
-	}
-	f = append(f, config, kernel)
-
-	// following files are measured if present
-	if ospkg.Manifest.Initramfs != "" {
-		initramfs := filepath.Join(ospkg.Dir, ospkg.Manifest.Initramfs)
-		_, err = os.Stat(initramfs)
-		if err == nil {
-			f = append(f, initramfs)
-		}
-	}
-	if ospkg.Manifest.Tboot != "" {
-		tboot := filepath.Join(ospkg.Dir, ospkg.Manifest.Tboot)
-		_, err = os.Stat(tboot)
-		if err == nil {
-			f = append(f, tboot)
-		}
-	}
-	for _, acm := range ospkg.Manifest.ACMs {
-		a := filepath.Join(ospkg.Dir, acm)
-		_, err = os.Stat(a)
-		if err == nil {
-			f = append(f, a)
-		}
-	}
-
-	ospkg.FilesToBeMeasured = f
-	return nil
-}
-
-// getSignatures initializes ospkg.signatures with the corresponding signatures
-// and certificates found in the signatures folder of ospkg's underlying tmpDir.
-// An error is returned if one of the files cannot be read or parsed.
-func (ospkg *OSPackage) getSignatures() error {
-	root := filepath.Join(ospkg.Dir, signaturesDir)
-
-	sigs := make([]Signature, 0)
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		ext := filepath.Ext(info.Name())
-
-		if !info.IsDir() && (ext == ".signature") {
-			sigBytes, err := ioutil.ReadFile(path)
-			if err != nil {
-				return err
-			}
-
-			certFile := strings.TrimSuffix(path, filepath.Ext(path)) + ".cert"
-			certBytes, err := ioutil.ReadFile(certFile)
-			if err != nil {
-				return err
-			}
-
-			cert, err := parseCertificate(certBytes)
-			if err != nil {
-				return err
-			}
-
-			sig := Signature{
-				Bytes: sigBytes,
-				Cert:  cert,
-			}
-			sigs = append(sigs, sig)
-			ospkg.Signatures = sigs
-		}
-		return nil
-	})
+	_, err := archive.Create(name)
 	return err
 }
 
-// createFileTree copies the provided files to a well known tree inside
-// the OSPackage's underlying tmpDir. The created tmpDir and a manifest
-// initialized with corresponding paths is retruned.
-func createFileTree(kernel, initramfs, tboot string, acms []string) (dir string, m OSManifest, err error) {
-	dir, err = ioutil.TempDir(os.TempDir(), "os-package")
+func zipFile(archive *zip.Writer, name string, src []byte) error {
+	f, err := archive.Create(name)
 	if err != nil {
-		return
+		return err
 	}
-	defer func() {
-		if err != nil {
-			os.RemoveAll(dir)
-		}
-	}()
-
-	var dst, rel string
-
-	// Kernel
-	if kernel == "" {
-		err = errors.New("kernel missing")
-		return
-	}
-	rel = filepath.Join(bootfilesDir, filepath.Base(kernel))
-	dst = filepath.Join(dir, rel)
-	if err = CreateAndCopy(kernel, dst); err != nil {
-		return
-	}
-	m.Kernel = rel
-
-	// Initramfs
-	if initramfs != "" {
-		rel = filepath.Join(bootfilesDir, filepath.Base(initramfs))
-		dst = filepath.Join(dir, rel)
-		if err = CreateAndCopy(initramfs, dst); err != nil {
-			return
-		}
-		m.Initramfs = rel
-	}
-
-	// tboot
-	if tboot != "" {
-		rel = filepath.Join(bootfilesDir, filepath.Base(tboot))
-		dst = filepath.Join(dir, rel)
-		if err = CreateAndCopy(tboot, dst); err != nil {
-			return
-		}
-		m.Tboot = rel
-	}
-
-	// ACMs
-	if len(acms) > 0 {
-		for _, acm := range acms {
-			rel = filepath.Join(acmDir, filepath.Base(acm))
-			dst = filepath.Join(dir, rel)
-			if err = CreateAndCopy(acm, dst); err != nil {
-				return
-			}
-			m.ACMs = append(m.ACMs, rel)
-		}
-	}
-
-	// signatures folder
-	p := filepath.Join(dir, signaturesDir)
-	if err = os.MkdirAll(p, os.ModePerm); err != nil {
-		return
-	}
-
-	return
+	_, err = io.Copy(f, bytes.NewReader(src))
+	return err
 }
 
-// CreateAndCopy copies the content of the file at src to dst. If dst does not
-// exist it is created. In case case src does not exist, creation of dst
-// or copying fails and error is returned.
-func CreateAndCopy(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
+func unzipFile(archive *zip.Reader, name string) ([]byte, error) {
+	for _, file := range archive.File {
+		if file.Name == name {
+			f, err := file.Open()
+			if err != nil {
+				return nil, fmt.Errorf("cannot open %s in archive: %v", name, err)
+			}
 
-	if err = os.MkdirAll(filepath.Dir(dst), os.ModePerm); err != nil {
-		return err
+			buf := new(bytes.Buffer)
+			if _, err = io.Copy(buf, f); err != nil {
+				return nil, fmt.Errorf("reading %s failed: %v", name, err)
+			}
+			return buf.Bytes(), nil
+		}
 	}
+	return nil, fmt.Errorf("cannot find %s in archive", name)
+}
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
+func calculateHash(data []byte) ([32]byte, error) {
+	if len(data) == 0 {
+		return [32]byte{}, fmt.Errorf("empty input")
 	}
-	defer out.Close()
-
-	if _, err = io.Copy(out, in); err != nil {
-		return err
-	}
-
-	return out.Sync()
+	return sha256.Sum256(data), nil
 }

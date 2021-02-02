@@ -30,8 +30,9 @@ var goversion string
 
 var (
 	create          = kingpin.Command("create", "Create a OS package from the provided operating system files")
-	createOut       = create.Flag("out", "Path to output initramfs file. Defaults to current directory").String()
-	createLabel     = create.Flag("label", "Name of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
+	createOut       = create.Flag("out", "Path to output ZIP archive file.").String()
+	createLabel     = create.Flag("label", "Short description of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
+	createPkgURL    = create.Flag("pkg-url", "URL of the OS package in case of network boot mode").String()
 	createKernel    = create.Flag("kernel", "Operation system kernel").Required().ExistingFile()
 	createInitramfs = create.Flag("initramfs", "Operation system initramfs").ExistingFile()
 	createCmdline   = create.Flag("cmd", "Kernel command line").String()
@@ -67,7 +68,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		if err := packOSPackage(out, label, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, acms); err != nil {
+		if err := packOSPackage(out, label, *createPkgURL, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, acms); err != nil {
 			log.Fatal(err)
 		}
 	case sign.FullCommand():

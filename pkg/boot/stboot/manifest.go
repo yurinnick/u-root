@@ -5,46 +5,55 @@
 package stboot
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 )
 
+const ManifestVersion int = 1
+
 // OSManifest describes the content and configuration of an OS package
 // loaded by stboot.
 type OSManifest struct {
-	Label string `json:"label"`
+	Version int    `json:"version"`
+	Label   string `json:"label"`
 
-	Kernel    string `json:"kernel"`
-	Initramfs string `json:"initramfs"`
-	Cmdline   string `json:"cmdline"`
+	KernelPath    string `json:"kernel"`
+	InitramfsPath string `json:"initramfs"`
+	Cmdline       string `json:"cmdline"`
 
-	Tboot     string   `json:"tboot"`
+	TbootPath string   `json:"tboot"`
 	TbootArgs string   `json:"tboot_args"`
-	ACMs      []string `json:"acms"`
+	ACMPaths  []string `json:"acms"`
 }
 
 // OSManifestFromFile parses a manifest from a json file
 func OSManifestFromFile(src string) (*OSManifest, error) {
-	mBytes, err := ioutil.ReadFile(src)
+	bytes, err := ioutil.ReadFile(src)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("manifest: cannot find JSON: %v", err)
 	}
-	m, err := OSManifestFromBytes(mBytes)
+	return OSManifestFromBytes(bytes)
+}
+
+func OSManifestFromStream(stream io.Reader) (*OSManifest, error) {
+	bytes, err := streamToBytes(stream)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("manifest: byte conversion failed: %v", err)
 	}
-	return m, nil
+	return OSManifestFromBytes(bytes)
 }
 
 // OSManifestFromBytes parses a manifest from a byte slice.
 func OSManifestFromBytes(data []byte) (*OSManifest, error) {
 	var m OSManifest
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("descriptor: parsing failed: %v", err)
 	}
 	return &m, nil
 }
@@ -56,7 +65,7 @@ func (m *OSManifest) Write(dir string) error {
 		return err
 	}
 	if !stat.IsDir() {
-		return fmt.Errorf("not a directory: %s", dir)
+		return fmt.Errorf("manifest: not a directory: %s", dir)
 	}
 
 	buf, err := m.Bytes()
@@ -66,7 +75,7 @@ func (m *OSManifest) Write(dir string) error {
 	dst := filepath.Join(dir, ManifestName)
 	err = ioutil.WriteFile(dst, buf, os.ModePerm)
 	if err != nil {
-		return err
+		return fmt.Errorf("manifest: writing to %s failed: %v", dir, err)
 	}
 	return nil
 }
@@ -75,18 +84,33 @@ func (m *OSManifest) Write(dir string) error {
 func (m *OSManifest) Bytes() ([]byte, error) {
 	buf, err := json.Marshal(m)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("manifest: serializing failed: %v", err)
 	}
 	return buf, nil
 }
 
 // Validate returns true if m is valid to be booted.
 func (m *OSManifest) Validate() error {
-	if m.Kernel == "" {
-		return errors.New("manifest: missing kernel")
+	// Version
+	if m.Version != ManifestVersion {
+		return fmt.Errorf("manifest: invalid version %d. Want %d", m.Version, ManifestVersion)
 	}
-	if m.Tboot != "" && len(m.ACMs) == 0 {
+	// Kernel path is mandatory
+	if m.KernelPath == "" {
+		return errors.New("manifest: missing kernel path")
+	}
+	// tboot
+	if m.TbootPath != "" && len(m.ACMPaths) == 0 {
 		return errors.New("manifest: tboot provided but missing ACM")
 	}
 	return nil
+}
+
+func streamToBytes(stream io.Reader) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	_, err := buf.ReadFrom(stream)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

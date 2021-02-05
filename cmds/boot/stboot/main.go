@@ -162,7 +162,7 @@ func main() {
 	////////////////
 	txtSupportedByHost = false
 	info("TXT self tests are not implementet yet.")
-	if !txtSupportedByHost {
+	if txtSupportedByHost {
 		info("TXT is supported on this platform")
 	}
 

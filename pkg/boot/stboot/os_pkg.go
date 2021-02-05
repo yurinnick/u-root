@@ -60,7 +60,7 @@ func InitOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootA
 		Archive:    out,
 		Manifest:   m,
 		Descriptor: d,
-		Signer:     Sha256PssSigner{},
+		Signer:     ED25519Signer{},
 	}
 
 	ospkg.Kernel, _ = ioutil.ReadFile(kernel)
@@ -138,7 +138,7 @@ func OSPackageFromBytes(archiveZIP, descriptorJSON []byte, archivePath string) (
 		Archive:    archivePath,
 		Raw:        archiveZIP,
 		Descriptor: descriptor,
-		Signer:     Sha256PssSigner{},
+		Signer:     ED25519Signer{},
 	}
 
 	ospkg.HashValue, err = calculateHash(ospkg.Raw)

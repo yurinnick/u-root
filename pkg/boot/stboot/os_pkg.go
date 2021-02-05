@@ -60,7 +60,7 @@ func InitOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootA
 		Archive:    out,
 		Manifest:   m,
 		Descriptor: d,
-		Signer:     Sha512PssSigner{},
+		Signer:     Sha256PssSigner{},
 	}
 
 	ospkg.Kernel, _ = ioutil.ReadFile(kernel)
@@ -120,7 +120,7 @@ func OSPackageFromArchive(name string) (*OSPackage, error) {
 	ospkg := &OSPackage{
 		Archive:    archivePath,
 		Descriptor: descriptor,
-		Signer:     Sha512PssSigner{},
+		Signer:     Sha256PssSigner{},
 	}
 
 	ospkg.Raw, err = ioutil.ReadFile(archivePath)

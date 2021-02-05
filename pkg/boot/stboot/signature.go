@@ -83,13 +83,13 @@ func (DummySigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
 	return nil
 }
 
-// Sha512PssSigner implements the Signer interface. It uses SHA512 hashes
+// Sha256PssSigner implements the Signer interface. It uses SHA256 hashes
 // and PSS signatures along with x509 certificates.
-type Sha512PssSigner struct{}
+type Sha256PssSigner struct{}
 
 // Sign signes the provided data with the key named by privKey. The returned
 // byte slice contains a PSS signature value.
-func (Sha512PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
+func (Sha256PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 	buf, err := ioutil.ReadFile(privKey)
 	if err != nil {
 		return nil, err
@@ -118,11 +118,11 @@ func (Sha512PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 }
 
 // Verify checks if sig contains a valid signature of hash.
-func (Sha512PssSigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
+func (Sha256PssSigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
 	opts := &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}
-	err := rsa.VerifyPSS(cert.PublicKey.(*rsa.PublicKey), crypto.SHA512, hash, sig, opts)
+	err := rsa.VerifyPSS(cert.PublicKey.(*rsa.PublicKey), crypto.SHA256, hash, sig, opts)
 	if err != nil {
-		return fmt.Errorf("signature verification failed: %v", err)
+		return fmt.Errorf("RSA PSS verification failed: %v", err)
 	}
 	return nil
 }

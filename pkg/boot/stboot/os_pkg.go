@@ -94,8 +94,10 @@ func InitOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootA
 	return ospkg, nil
 }
 
-// OSPackageFromArchive constructs a OSPackage from a zip file at archive.
-func OSPackageFromArchive(name string) (*OSPackage, error) {
+// OSPackageFromArchive opens a OSPackage. Either the path to the os package
+// ZIP file or to the os package descriptor JSON file can be passed. Both
+// files are expected to have the same name.
+func OSPackageFromFile(name string) (*OSPackage, error) {
 	ext := filepath.Ext(name)
 	if ext != OSPackageExt && ext != DescriptorExt {
 		return nil, fmt.Errorf("os package: invalid file extension %s", ext)
@@ -105,8 +107,23 @@ func OSPackageFromArchive(name string) (*OSPackage, error) {
 	archivePath := name + OSPackageExt
 	descriptorPath := name + DescriptorExt
 
+	archiveBytes, err := ioutil.ReadFile(archivePath)
+	if err != nil {
+		return nil, fmt.Errorf("os package: opening archive failed: %v", err)
+	}
+	descriptorBytes, err := ioutil.ReadFile(descriptorPath)
+	if err != nil {
+		return nil, fmt.Errorf("os package: opening descriptor failed: %v", err)
+	}
+
+	return OSPackageFromBytes(archiveBytes, descriptorBytes, archivePath)
+}
+
+// OSPackageFromArchive constructs a OSPackage from a zip file at archive.
+func OSPackageFromBytes(archiveZIP, descriptorJSON []byte, archivePath string) (*OSPackage, error) {
+
 	// descriptor
-	descriptor, err := DescriptorFromFile(descriptorPath)
+	descriptor, err := DescriptorFromBytes(descriptorJSON)
 	if err != nil {
 		if err != nil {
 			return nil, fmt.Errorf("os package: %v", err)
@@ -119,13 +136,9 @@ func OSPackageFromArchive(name string) (*OSPackage, error) {
 
 	ospkg := &OSPackage{
 		Archive:    archivePath,
+		Raw:        archiveZIP,
 		Descriptor: descriptor,
 		Signer:     Sha256PssSigner{},
-	}
-
-	ospkg.Raw, err = ioutil.ReadFile(archivePath)
-	if err != nil {
-		return nil, fmt.Errorf("os package: opening archive failed: %v", err)
 	}
 
 	ospkg.HashValue, err = calculateHash(ospkg.Raw)

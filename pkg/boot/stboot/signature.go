@@ -7,6 +7,7 @@ package stboot
 import (
 	"bytes"
 	"crypto"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -68,6 +69,8 @@ type Signer interface {
 // that are always valid.
 type DummySigner struct{}
 
+var _ Signer = DummySigner{}
+
 // Sign returns a signature containing just 8 random bytes.
 func (DummySigner) Sign(privKey string, data []byte) ([]byte, error) {
 	sig := make([]byte, 8)
@@ -87,6 +90,8 @@ func (DummySigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
 // and PSS signatures along with x509 certificates.
 type Sha256PssSigner struct{}
 
+var _ Signer = Sha256PssSigner{}
+
 // Sign signes the provided data with the key named by privKey. The returned
 // byte slice contains a PSS signature value.
 func (Sha256PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
@@ -100,10 +105,6 @@ func (Sha256PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if key == nil {
-		err = fmt.Errorf("key is empty")
-		return nil, err
-	}
 
 	opts := &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}
 
@@ -111,8 +112,8 @@ func (Sha256PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sig == nil {
-		return nil, fmt.Errorf("signature is nil")
+	if len(sig) == 0 {
+		return nil, fmt.Errorf("signature has zero lenght")
 	}
 	return sig, nil
 }
@@ -120,9 +121,38 @@ func (Sha256PssSigner) Sign(privKey string, data []byte) ([]byte, error) {
 // Verify checks if sig contains a valid signature of hash.
 func (Sha256PssSigner) Verify(sig, hash []byte, cert *x509.Certificate) error {
 	opts := &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}
-	err := rsa.VerifyPSS(cert.PublicKey.(*rsa.PublicKey), crypto.SHA256, hash, sig, opts)
+	return rsa.VerifyPSS(cert.PublicKey.(*rsa.PublicKey), crypto.SHA256, hash, sig, opts)
+}
+
+type ED25519Signer struct{}
+
+var _ Signer = ED25519Signer{}
+
+// Sign signes the provided data with the key named by privKey.
+func (ED25519Signer) Sign(privKey string, data []byte) ([]byte, error) {
+	buf, err := ioutil.ReadFile(privKey)
 	if err != nil {
-		return fmt.Errorf("RSA PSS verification failed: %v", err)
+		return nil, err
+	}
+
+	privPem, _ := pem.Decode(buf)
+	key, err := x509.ParsePKCS8PrivateKey(privPem.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	// if key.(type) != ed25519.PrivateKey {
+	// 	return nil, fmt.Errorf("not a ed25519 private key")
+	// }
+
+	return ed25519.Sign(key.(ed25519.PrivateKey), data), nil
+}
+
+// Verify checks if sig contains a valid signature of hash.
+func (ED25519Signer) Verify(sig, hash []byte, cert *x509.Certificate) error {
+	ok := ed25519.Verify(cert.PublicKey.(ed25519.PublicKey), hash, sig)
+	if !ok {
+		return errors.New("ed25519 verification failed")
 	}
 	return nil
 }

@@ -29,7 +29,7 @@ func packOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootA
 }
 
 func addSignatureToOSPackage(osPackage, privKey, cert string) error {
-	ospkg, err := stboot.OSPackageFromArchive(osPackage)
+	ospkg, err := stboot.OSPackageFromFile(osPackage)
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func addSignatureToOSPackage(osPackage, privKey, cert string) error {
 }
 
 func unpackOSPackage(ospkgPath string) error {
-	ospkg, err := stboot.OSPackageFromArchive(ospkgPath)
+	ospkg, err := stboot.OSPackageFromFile(ospkgPath)
 	if err != nil {
 		return err
 	}

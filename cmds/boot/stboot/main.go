@@ -204,7 +204,7 @@ func main() {
 	var osi boot.OSImage
 	for _, path := range ospkgFiles {
 		info("Opening OS package %s", path)
-		ospkg, err := stboot.OSPackageFromArchive(path)
+		ospkg, err := stboot.OSPackageFromFile(path)
 		if err != nil {
 			debug("%v", err)
 			continue

@@ -51,6 +51,7 @@ var (
 
 func main() {
 	log.SetPrefix("stmanager: ")
+	log.SetFlags(0)
 	kingpin.UsageTemplate(kingpin.CompactUsageTemplate).Version(goversion).Author(Author)
 	kingpin.CommandLine.Help = HelpText
 

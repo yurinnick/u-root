@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -306,75 +307,82 @@ func (ospkg *OSPackage) Pack() error {
 	return nil
 }
 
-// Sign signes ospkg.HashValue using ospkg.Signer with the private key named by
-// privKeyFile. The certificate named by certFile is supposed to correspond
-// to the private key. Both, the signature and the certificate are stored into
-// the OSPackage.
-func (ospkg *OSPackage) Sign(privKeyFile, certFile string) error {
-	if _, err := os.Stat(privKeyFile); err != nil {
-		return err
-	}
+// Sign signes ospkg.HashValue using ospkg.Signer.
+// Both, the signature and the certificate are stored into the OSPackage.
+func (ospkg *OSPackage) Sign(keyBlock, certBlock *pem.Block) error {
 
-	certBytes, err := ioutil.ReadFile(certFile)
+	hash, err := calculateHash(ospkg.Raw)
 	if err != nil {
 		return err
 	}
+	ospkg.HashValue = hash
 
-	cert, err := parseCertificate(certBytes)
+	priv, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("os package sign: parse PKCS8: %v", err)
 	}
 
-	ospkg.HashValue, err = calculateHash(ospkg.Raw)
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("os package sign: parse certificate: %v", err)
 	}
 
 	// check for dublicate certificates
-	for _, certBytes := range ospkg.Descriptor.Certificates {
-		storedCert, err := parseCertificate(certBytes)
+	for _, pemBytes := range ospkg.Descriptor.Certificates {
+		block, _ := pem.Decode(pemBytes)
+		storedCert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
 			return err
 		}
 		if storedCert.Equal(cert) {
-			return fmt.Errorf("certificate has already been used: %v", certFile)
+			return errors.New("certificate has already been used")
 		}
 	}
 
 	// sign with private key
-	sig, err := ospkg.Signer.Sign(privKeyFile, ospkg.HashValue[:])
+
+	sig, err := ospkg.Signer.Sign(priv, ospkg.HashValue[:])
 	if err != nil {
 		return fmt.Errorf("signing failed: %v", err)
 	}
 
-	ospkg.Descriptor.Certificates = append(ospkg.Descriptor.Certificates, certBytes)
+	certPEM := pem.EncodeToMemory(certBlock)
+	ospkg.Descriptor.Certificates = append(ospkg.Descriptor.Certificates, certPEM)
 	ospkg.Descriptor.Signatures = append(ospkg.Descriptor.Signatures, sig)
 	return nil
 }
 
-// Verify first validates the certificates stored together with the signatures
-// in the os package descriptor against the provided root certificate and then
+// Verify first verifies the certificates stored together with the signatures
+// in the os package descriptor against the provided root certificates and then
 // verifies the signatures.
 // The number of found signatures and the number of valid signatures are returned.
 // A signature is valid if:
 // * Its certificate was signed by the root certificate
 // * It passed verification
 // * Its certificate is not a duplicate of a previous one
-func (ospkg *OSPackage) Verify(rootCertPEM []byte) (found, valid int, err error) {
+func (ospkg *OSPackage) Verify(roots *x509.CertPool) (found, valid int, err error) {
 	found = 0
 	valid = 0
 	var certsUsed []*x509.Certificate
 	for i, sig := range ospkg.Descriptor.Signatures {
 		found++
-		cert, err := parseCertificate(ospkg.Descriptor.Certificates[i])
+		block, _ := pem.Decode(ospkg.Descriptor.Certificates[i])
+		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return 0, 0, fmt.Errorf("verify: certificate %d: parsing failed: %v", i, err)
+			return 0, 0, fmt.Errorf("verify: certificate %d: parsing failed: %v", i+1, err)
 		}
-		err = ValidateCertificate(cert, rootCertPEM)
+
+		// verify certificate
+		opts := x509.VerifyOptions{
+			Roots: roots,
+		}
+		_, err = cert.Verify(opts)
 		if err != nil {
 			log.Printf("skip signature %d: invalid certificate: %v", i+1, err)
 			continue
 		}
+
+		// check for dublicates
 		var dublicate bool
 		for _, c := range certsUsed {
 			if c.Equal(cert) {
@@ -387,7 +395,9 @@ func (ospkg *OSPackage) Verify(rootCertPEM []byte) (found, valid int, err error)
 			continue
 		}
 		certsUsed = append(certsUsed, cert)
-		err = ospkg.Signer.Verify(sig, ospkg.HashValue[:], cert)
+
+		// verify signature
+		err = ospkg.Signer.Verify(sig, ospkg.HashValue[:], cert.PublicKey)
 		if err != nil {
 			log.Printf("skip signature %d: verification failed: %v", i+1, err)
 			continue

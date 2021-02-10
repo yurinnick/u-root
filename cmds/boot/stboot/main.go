@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/x509"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -103,13 +104,18 @@ func main() {
 	}
 
 	////////////////////////////
-	// Ssigning root certificate
+	// Signing root certificate
 	////////////////////////////
-	signingRootPEM, err := ioutil.ReadFile(signingRootFile)
+
+	pemBytes, err := ioutil.ReadFile(signingRootFile)
 	if err != nil {
-		reboot("Signing root certificate missing: %v", err)
+		reboot("loading signing root cert failed: %v", err)
 	}
-	debug("Signing Root: %s", string(signingRootPEM))
+
+	signingRoots := x509.NewCertPool()
+	if ok := signingRoots.AppendCertsFromPEM(pemBytes); !ok {
+		reboot("parsing signing root cert failed")
+	}
 
 	//////////////////////////////
 	// STBOOT and STDATA partition
@@ -220,7 +226,7 @@ func main() {
 			info("Label: %s", ospkg.Manifest.Label)
 		}
 
-		n, valid, err := ospkg.Verify(signingRootPEM)
+		n, valid, err := ospkg.Verify(signingRoots)
 		if err != nil {
 			debug("Error verifying OS package: %v", err)
 			continue

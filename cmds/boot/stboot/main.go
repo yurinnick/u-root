@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -111,10 +112,18 @@ func main() {
 	if err != nil {
 		reboot("loading signing root cert failed: %v", err)
 	}
+	debug("signing root certificate:\n%s", string(pemBytes))
+	pemBlock, rest := pem.Decode(pemBytes)
+	if pemBlock == nil {
+		reboot("decoding signing root cert failed: %v", err)
+	}
+	if len(rest) > 0 {
+		reboot("signing root cert: unexpeceted trailing data")
+	}
 
-	signingRoots := x509.NewCertPool()
-	if ok := signingRoots.AppendCertsFromPEM(pemBytes); !ok {
-		reboot("parsing signing root cert failed")
+	signingRoot, err := x509.ParseCertificate(pemBlock.Bytes)
+	if err != nil {
+		reboot("parsing signing root cert failed: %v", err)
 	}
 
 	//////////////////////////////
@@ -226,7 +235,7 @@ func main() {
 			info("Label: %s", ospkg.Manifest.Label)
 		}
 
-		n, valid, err := ospkg.Verify(signingRoots)
+		n, valid, err := ospkg.Verify(signingRoot)
 		if err != nil {
 			debug("Error verifying OS package: %v", err)
 			continue

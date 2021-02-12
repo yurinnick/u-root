@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/multiboot"
@@ -360,9 +361,10 @@ func (ospkg *OSPackage) Sign(keyBlock, certBlock *pem.Block) error {
 // * Its certificate was signed by the root certificate
 // * It passed verification
 // * Its certificate is not a duplicate of a previous one
-func (ospkg *OSPackage) Verify(roots *x509.CertPool) (found, valid int, err error) {
+func (ospkg *OSPackage) Verify(rootCert *x509.Certificate) (found, valid int, err error) {
 	found = 0
 	valid = 0
+
 	var certsUsed []*x509.Certificate
 	for i, sig := range ospkg.Descriptor.Signatures {
 		found++
@@ -372,10 +374,15 @@ func (ospkg *OSPackage) Verify(roots *x509.CertPool) (found, valid int, err erro
 			return 0, 0, fmt.Errorf("verify: certificate %d: parsing failed: %v", i+1, err)
 		}
 
-		// verify certificate
+		// verify certificate: only make sure that cert was signed by roots.
+		// no further verification opions, not even validity dates.
+		hackValidityBounds(rootCert)
+		roots := x509.NewCertPool()
+		roots.AddCert(rootCert)
 		opts := x509.VerifyOptions{
 			Roots: roots,
 		}
+		hackValidityBounds(cert)
 		_, err = cert.Verify(opts)
 		if err != nil {
 			log.Printf("skip signature %d: invalid certificate: %v", i+1, err)
@@ -499,4 +506,9 @@ func calculateHash(data []byte) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("empty input")
 	}
 	return sha256.Sum256(data), nil
+}
+
+func hackValidityBounds(cert *x509.Certificate) {
+	cert.NotBefore = time.Now().Add(-24 * time.Hour)
+	cert.NotAfter = time.Now().Add(24 * time.Hour)
 }

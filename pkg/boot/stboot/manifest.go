@@ -82,7 +82,7 @@ func (m *OSManifest) Write(dir string) error {
 
 // Bytes serializes a manifest stuct into a byte slice.
 func (m *OSManifest) Bytes() ([]byte, error) {
-	buf, err := json.Marshal(m)
+	buf, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("manifest: serializing failed: %v", err)
 	}

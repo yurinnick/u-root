@@ -42,7 +42,7 @@ func DescriptorFromBytes(data []byte) (*Descriptor, error) {
 
 // Bytes serializes a manifest stuct into a byte slice.
 func (d *Descriptor) Bytes() ([]byte, error) {
-	buf, err := json.Marshal(d)
+	buf, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("descriptor: serializing failed: %v", err)
 	}

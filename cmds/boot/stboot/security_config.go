@@ -25,10 +25,10 @@ func (b bootmode) String() string {
 
 // SecurityConfig contains platform-specific data.
 type SecurityConfig struct {
-	// MinimalSignaturesMatch is the min number of signatures that must pass validation.
-	MinimalSignaturesMatch int `json:"minimal_signatures_match"`
-	//BootMode
-	BootMode bootmode `json:"boot_mode"`
+	Version                int      `json:"version"`
+	MinimalSignaturesMatch int      `json:"minimal_signatures_match"`
+	BootMode               bootmode `json:"boot_mode"`
+	UsePkgCache            bool     `json:"use_ospkg_cache"`
 }
 
 // loadSecurityConfig parses security_configuration.json file.

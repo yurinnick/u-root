@@ -25,11 +25,15 @@ func (n networkmode) String() string {
 
 // HostConfig contains configuration data for a System Transparency host.
 type HostConfig struct {
+	Version          int         `json:"version"`
 	NetworkMode      networkmode `json:"network_mode"`
 	HostIP           string      `json:"host_ip"`
 	DefaultGateway   string      `json:"gateway"`
 	DNSServer        string      `json:"dns"`
 	ProvisioningURLs []string    `json:"provisioning_urls"`
+	ID               string      `json:"identity"`
+	Auth             string      `json:"authentication"`
+	EntropySeed      string      `json:"entropy_seed"`
 }
 
 // loadHoatConfig parses host_configuration.json file.

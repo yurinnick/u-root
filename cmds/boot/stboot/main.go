@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/stboot"
@@ -219,7 +220,17 @@ func main() {
 	var osi boot.OSImage
 	for _, path := range ospkgFiles {
 		info("Opening OS package %s", path)
-		ospkg, err := stboot.OSPackageFromFile(path)
+		archive, err := ioutil.ReadFile(path)
+		if err != nil {
+			reboot("%v", err)
+		}
+		dpath := strings.TrimSuffix(path, stboot.OSPackageExt)
+		dpath = dpath + stboot.DescriptorExt
+		descriptor, err := ioutil.ReadFile(dpath)
+		if err != nil {
+			reboot("%v", err)
+		}
+		ospkg, err := stboot.NewOSPackage(archive, descriptor)
 		if err != nil {
 			debug("%v", err)
 			continue
@@ -228,12 +239,12 @@ func main() {
 		////////////////////
 		// Verify OS package
 		////////////////////
-		if *doDebug {
-			str, _ := json.MarshalIndent(ospkg.Manifest, "", "  ")
-			info("OS package manifest: %s", str)
-		} else {
-			info("Label: %s", ospkg.Manifest.Label)
-		}
+		// if *doDebug {
+		// 	str, _ := json.MarshalIndent(ospkg.Manifest, "", "  ")
+		// 	info("OS package manifest: %s", str)
+		// } else {
+		// 	info("Label: %s", ospkg.Manifest.Label)
+		// }
 
 		n, valid, err := ospkg.Verify(signingRoot)
 		if err != nil {
@@ -267,9 +278,6 @@ func main() {
 	if osi == nil {
 		reboot("No usable OS package")
 	}
-
-	info("Operating system: %s", osi.Label())
-	debug("%s", osi.String())
 
 	///////////////////////
 	// Measure OS into PCRs

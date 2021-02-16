@@ -14,31 +14,45 @@ import (
 	"io/ioutil"
 	"log"
 	"math/big"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/u-root/u-root/pkg/boot/stboot"
 )
 
 func createCmd(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs string, acms []string) error {
-	ospkg, err := stboot.InitOSPackage(out, label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs, acms)
+	ospkg, err := stboot.CreateOSPackage(label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs, acms)
 	if err != nil {
 		return err
 	}
 
-	err = ospkg.Pack()
+	archive, err := ospkg.ArchiveBytes()
+	if err != nil {
+		return err
+	}
+	descriptor, err := ospkg.DescriptorBytes()
 	if err != nil {
 		return err
 	}
 
-	newArchive := filepath.Base(ospkg.Archive)
-	os.Stdout.WriteString(newArchive)
+	if err := ioutil.WriteFile(out+stboot.OSPackageExt, archive, 0666); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(out+stboot.DescriptorExt, descriptor, 0666); err != nil {
+		return err
+	}
 	return nil
 }
 
-func signCmd(osPackagePath, privKeyPath, certPath string) error {
-	ospkg, err := stboot.OSPackageFromFile(osPackagePath)
+func signCmd(pkgPath, privKeyPath, certPath string) error {
+	archive, err := ioutil.ReadFile(pkgPath + stboot.OSPackageExt)
+	if err != nil {
+		return err
+	}
+	descriptor, err := ioutil.ReadFile(pkgPath + stboot.DescriptorExt)
+	if err != nil {
+		return err
+	}
+	ospkg, err := stboot.NewOSPackage(archive, descriptor)
 	if err != nil {
 		return err
 	}
@@ -58,21 +72,18 @@ func signCmd(osPackagePath, privKeyPath, certPath string) error {
 		return err
 	}
 
-	if err = ospkg.Pack(); err != nil {
+	descriptor, err = ospkg.DescriptorBytes()
+	if err != nil {
 		return err
 	}
-
-	log.Printf("Signatures included: %d", len(ospkg.Descriptor.Signatures))
+	if err := ioutil.WriteFile(pkgPath+stboot.DescriptorExt, descriptor, 0666); err != nil {
+		return err
+	}
 	return nil
 }
 
 func showCmd(ospkgPath string) error {
-	ospkg, err := stboot.OSPackageFromFile(ospkgPath)
-	if err != nil {
-		return err
-	}
-
-	log.Println("Archive unpacked into: " + ospkg.Archive)
+	log.Print("Not yet implemented")
 	return nil
 }
 

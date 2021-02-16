@@ -13,9 +13,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
+	"github.com/u-root/u-root/pkg/boot/stboot"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 const (
@@ -24,7 +26,7 @@ const (
 	// HelpText is the command line help
 	HelpText = "stmanager can be used for managing System Transparency OS packages"
 
-	DefaultPackageName  = "system-transparency-os-package.zip"
+	DefaultOutName      = "system-transparency-os-package"
 	DefaultCertName     = "cert.pem"
 	DefaultRootCertName = "rootcert.pem"
 	DefaultKeyName      = "key.pem"
@@ -36,7 +38,7 @@ var goversion string
 
 var (
 	create          = kingpin.Command("create", "Create a OS package from the provided operating system files")
-	createOut       = create.Flag("out", "Path to output ZIP archive file. Defaults to "+DefaultPackageName).String()
+	createOut       = create.Flag("out", "OS package output path. Two files will be created: the archive ZIP file and the descriptor JSON file. A directory or a filename can be passed. In case of a filenema the file extensions will be set propperly. Default name is "+DefaultOutName).String()
 	createLabel     = create.Flag("label", "Short description of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
 	createPkgURL    = create.Flag("pkg-url", "URL of the OS package in case of network boot mode").String()
 	createKernel    = create.Flag("kernel", "Operation system kernel").Required().ExistingFile()
@@ -49,7 +51,7 @@ var (
 	sign            = kingpin.Command("sign", "Sign the provided OS package")
 	signPrivKeyFile = sign.Flag("key", "Private key for signing").Required().ExistingFile()
 	signCertFile    = sign.Flag("cert", "Certificate corresponding to the private key").Required().ExistingFile()
-	signOSPackage   = sign.Arg("OS package", "Archive created by 'stconfig create'").Required().ExistingFile()
+	signOSPackage   = sign.Arg("OS package", "OS package archive or descriptor file. Both need to be present").Required().ExistingFile()
 
 	show          = kingpin.Command("show", "Unpack OS package  file into directory")
 	showOSPackage = show.Arg("OS package", "Archive containing the boot files").Required().ExistingFile()
@@ -71,28 +73,46 @@ func main() {
 	kingpin.CommandLine.Help = HelpText
 
 	switch kingpin.Parse() {
-	case create.FullCommand():
-		checkCreateOut()
-		checkCreateLabel()
 
-		acms, err := checkCreateACMs(*createACM)
+	case create.FullCommand():
+		outpath, err := parsePkgPath(*createOut)
+		if err != nil {
+			log.Fatal(err)
+		}
+		label := parseLabel(*createLabel)
+
+		acms, err := parseACMPaths(*createACM)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		if err := createCmd(*createOut, *createLabel, *createPkgURL, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, acms); err != nil {
+		if err := createCmd(outpath, label, *createPkgURL, *createKernel, *createInitramfs, *createCmdline, *createTboot, *createTbootArgs, acms); err != nil {
 			log.Fatal(err)
 		}
+
 	case sign.FullCommand():
-		if err := signCmd(*signOSPackage, *signPrivKeyFile, *signCertFile); err != nil {
+		pkgPath, err := parsePkgPath(*signOSPackage)
+		if err != nil {
 			log.Fatal(err)
 		}
+		if err := signCmd(pkgPath, *signPrivKeyFile, *signCertFile); err != nil {
+			log.Fatal(err)
+		}
+
 	case show.FullCommand():
 		if err := showCmd(*showOSPackage); err != nil {
 			log.Fatal(err)
 		}
+
 	case keygen.FullCommand():
-		checkKeygenOuts()
+		keyOut, err := parsePrivKeyPath(*keygenKeyOut, *keygenIsCA)
+		if err != nil {
+			log.Fatal(err)
+		}
+		certOut, err := parsePubKeyPath(*keygenCertOut, *keygenIsCA)
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		notBefore, err := parseTime(*keygenValidFrom)
 		if err != nil {
@@ -104,74 +124,97 @@ func main() {
 		}
 
 		if *keygenIsCA {
-			if err := keygenCmd("", "", notBefore, notAfter, *keygenCertOut, *keygenKeyOut); err != nil {
+			if err := keygenCmd("", "", notBefore, notAfter, certOut, keyOut); err != nil {
 				log.Fatal(err)
 			}
 		} else {
 			if *keygenRootCert == "" || *keygenRootKey == "" {
 				log.Fatal("missing flag, try --help")
 			}
-			if err := keygenCmd(*keygenRootCert, *keygenRootKey, notBefore, notAfter, *keygenCertOut, *keygenKeyOut); err != nil {
+			if err := keygenCmd(*keygenRootCert, *keygenRootKey, notBefore, notAfter, certOut, keyOut); err != nil {
 				log.Fatal(err)
 			}
 		}
+
 	default:
 		log.Fatal("command not found")
 	}
 }
 
-func checkCreateOut() {
-	if *createOut == "" {
-		*createOut = DefaultPackageName
+func parsePkgPath(p string) (string, error) {
+	if p == "" {
+		return DefaultOutName, nil
+	}
+	stat, err := os.Stat(p)
+	if err != nil {
+		// non existing file or dir
+		dir := filepath.Dir(p)
+		if dir != "." {
+			_, err := os.Stat(dir)
+			if err != nil {
+				// non existing dir
+				return "", err
+			}
+			// non existing file in existing dir - continue
+		}
 	} else {
-		dir := filepath.Dir(*createOut)
-		if _, err := os.Stat(dir); err != nil {
-			log.Fatal(err)
+		// existing file or dir
+		if stat.IsDir() {
+			//existing dir
+			return filepath.Join(p, DefaultOutName), nil
 		}
+		// existing file - continue
+	}
 
-		ext := filepath.Ext(*createOut)
-		if ext != ".zip" {
-			*createOut = *createOut + ".zip"
-		}
+	// p includes file name
+	ext := filepath.Ext(p)
+	switch ext {
+	case "":
+		return p, nil
+	case stboot.OSPackageExt, stboot.DescriptorExt:
+		return strings.TrimSuffix(p, ext), nil
+	default:
+		return "", fmt.Errorf("invalid file extension %s", ext)
 	}
 }
 
-func checkKeygenOuts() {
-	if *keygenCertOut == "" {
-		if *keygenIsCA {
-			*keygenCertOut = DefaultRootCertName
-		} else {
-			*keygenCertOut = DefaultCertName
+func parsePrivKeyPath(k string, isCA bool) (string, error) {
+	if k == "" {
+		if isCA {
+			return DefaultRootKeyName, nil
 		}
-	} else {
-		dir := filepath.Dir(*keygenCertOut)
-		if _, err := os.Stat(dir); err != nil {
-			log.Fatal(err)
-		}
+		return DefaultKeyName, nil
 	}
-
-	if *keygenKeyOut == "" {
-		if *keygenIsCA {
-			*keygenKeyOut = DefaultRootKeyName
-		} else {
-			*keygenKeyOut = DefaultKeyName
-		}
-	} else {
-		dir := filepath.Dir(*keygenKeyOut)
-		if _, err := os.Stat(dir); err != nil {
-			log.Fatal(err)
-		}
+	dir := filepath.Dir(k)
+	if _, err := os.Stat(dir); err != nil {
+		return "", err
 	}
+	return k, nil
 }
 
-func checkCreateLabel() {
-	if *createLabel == "" {
+func parsePubKeyPath(k string, isCA bool) (string, error) {
+	if k == "" {
+		if isCA {
+			return DefaultRootCertName, nil
+		}
+		return DefaultCertName, nil
+	}
+	dir := filepath.Dir(k)
+	if _, err := os.Stat(dir); err != nil {
+		return "", err
+	}
+	return k, nil
+}
+
+func parseLabel(l string) string {
+	if l == "" {
 		k := filepath.Base(*createKernel)
-		*createLabel = fmt.Sprintf("System Tarnsparency OS Package %s", k)
+		return fmt.Sprintf("System Tarnsparency OS Package %s", k)
 	}
+	return l
 }
 
-func checkCreateACMs(acm string) ([]string, error) {
+func parseACMPaths(acm string) ([]string, error) {
 	var acms []string
 	if *createACM != "" {
 		stat, err := os.Stat(*createACM)

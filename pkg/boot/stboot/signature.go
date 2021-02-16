@@ -13,7 +13,7 @@ import (
 	"fmt"
 )
 
-// Signer is used by OSPackage to hash, sign and varify the OSPackage.
+// Signer is used by OSPackage to sign and varify the OSPackage.
 type Signer interface {
 	Sign(key crypto.PrivateKey, data []byte) ([]byte, error)
 	Verify(sig, hash []byte, key crypto.PublicKey) error

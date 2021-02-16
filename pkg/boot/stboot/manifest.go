@@ -89,7 +89,7 @@ func (m *OSManifest) Bytes() ([]byte, error) {
 	return buf, nil
 }
 
-// Validate returns true if m is valid to be booted.
+// Validate returns no.
 func (m *OSManifest) Validate() error {
 	// Version
 	if m.Version != ManifestVersion {

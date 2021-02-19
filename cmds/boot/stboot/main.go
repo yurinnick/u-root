@@ -19,22 +19,19 @@ import (
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/stboot"
-	"github.com/u-root/u-root/pkg/crypto"
 	"github.com/u-root/u-root/pkg/recovery"
 	"github.com/u-root/u-root/pkg/ulog"
 )
 
 var (
-	noMeasuredBoot = flag.Bool("no-measurement", false, "Do not extend PCRs with measurements of the loaded OS")
-	doDebug        = flag.Bool("debug", false, "Print additional debug output")
-	klog           = flag.Bool("klog", false, "Print output to all attached consoles via the kernel log")
-	dryRun         = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
+	doDebug = flag.Bool("debug", false, "Print additional debug output")
+	klog    = flag.Bool("klog", false, "Print output to all attached consoles via the kernel log")
+	dryRun  = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
 
 	debug = func(string, ...interface{}) {}
 
-	sc                 *SecurityConfig
-	hc                 *HostConfig
-	txtSupportedByHost bool
+	sc *SecurityConfig
+	hc *HostConfig
 )
 
 // files at initramfs
@@ -69,8 +66,8 @@ var banner = `
 
 var check = `           
            //\\
-OS is     //  \\
-valid    //   //
+verified  //  \\
+OS       //   //
         //   //
  //\\  //   //
 //  \\//   //
@@ -127,6 +124,20 @@ func main() {
 		reboot("parsing signing root cert failed: %v", err)
 	}
 
+	////////////////////////////
+	// https root certificates
+	////////////////////////////
+	httpsRoots := x509.NewCertPool()
+	if sc.BootMode == Network {
+		pemBytes, err = ioutil.ReadFile(httpsRootsFile)
+		if err != nil {
+			reboot("loading https root certs failed: %v", err)
+		}
+		if ok := httpsRoots.AppendCertsFromPEM(pemBytes); !ok {
+			reboot("parsing https root certs failed")
+		}
+	}
+
 	//////////////////////////////
 	// STBOOT and STDATA partition
 	//////////////////////////////
@@ -176,9 +187,9 @@ func main() {
 	////////////////
 	// TXT self test
 	////////////////
-	txtSupportedByHost = false
+	txtHostSuport := false
 	info("TXT self tests are not implementet yet.")
-	if txtSupportedByHost {
+	if txtHostSuport {
 		info("TXT is supported on this platform")
 	}
 
@@ -217,7 +228,8 @@ func main() {
 	//////////////////////
 	// Process OS packages
 	//////////////////////
-	var osi boot.OSImage
+	var bootImg boot.OSImage
+	var ospkg *stboot.OSPackage
 	for _, path := range ospkgFiles {
 		info("Opening OS package %s", path)
 		archive, err := ioutil.ReadFile(path)
@@ -230,7 +242,7 @@ func main() {
 		if err != nil {
 			reboot("%v", err)
 		}
-		ospkg, err := stboot.NewOSPackage(archive, descriptor)
+		ospkg, err = stboot.NewOSPackage(archive, descriptor)
 		if err != nil {
 			debug("%v", err)
 			continue
@@ -240,10 +252,7 @@ func main() {
 		// Verify OS package
 		////////////////////
 		// if *doDebug {
-		// 	str, _ := json.MarshalIndent(ospkg.Manifest, "", "  ")
-		// 	info("OS package manifest: %s", str)
-		// } else {
-		// 	info("Label: %s", ospkg.Manifest.Label)
+		// 	//TODO: write ospkg.info method
 		// }
 
 		n, valid, err := ospkg.Verify(signingRoot)
@@ -263,10 +272,20 @@ func main() {
 		/////////////
 		// Extract OS
 		/////////////
-		osi, err = extractOS(ospkg)
+		bootImg, err = ospkg.OSImage(txtHostSuport)
 		if err != nil {
-			debug("%v", err)
-			continue
+			reboot("error parsing boot image: %v", err)
+		}
+		switch t := bootImg.(type) {
+		case *boot.LinuxImage:
+			if txtHostSuport {
+				debug("TXT is supported on the host, but the os package doesn't provide tboot")
+			}
+			debug("got linux boot image from os package")
+		case *boot.MultibootImage:
+			debug("got tboot multiboot image from os package")
+		default:
+			reboot("unknown boot image type %T", t)
 		}
 
 		if sc.BootMode == Local {
@@ -274,23 +293,35 @@ func main() {
 		}
 		break
 	} // end process-os-pkgs-loop
-
-	if osi == nil {
+	if bootImg == nil {
 		reboot("No usable OS package")
 	}
+	debug("boot image:\n %s", bootImg.String())
 
 	///////////////////////
-	// Measure OS into PCRs
+	// TPM Measurement
 	///////////////////////
-	if *noMeasuredBoot {
-		info("WARNING: measured boot disabled!")
-	} else {
-		// TODO: measure osi byte stream not its label
-		err = crypto.TryMeasureData(crypto.BootConfigPCR, []byte(osi.Label()), osi.Label())
-		if err != nil {
-			reboot("measured boot failed: %v", err)
-		}
-		// TODO: measure security_configuration.json and files from data partition
+	info("Try TPM measurements")
+	var toBeMeasured = [][]byte{}
+
+	ospkgBytes, _ := ospkg.ArchiveBytes()
+	descriptorBytes, _ := ospkg.DescriptorBytes()
+	securityConfigBytes, _ := json.Marshal(sc)
+
+	toBeMeasured = append(toBeMeasured, ospkgBytes)
+	debug(" - OS package zip: %d bytes", len(ospkgBytes))
+	toBeMeasured = append(toBeMeasured, descriptorBytes)
+	debug(" - OS package descriptor: %d bytes", len(descriptorBytes))
+	toBeMeasured = append(toBeMeasured, securityConfigBytes)
+	debug(" - Security configuration json: %d bytes", len(securityConfigBytes))
+	toBeMeasured = append(toBeMeasured, signingRoot.Raw)
+	debug(" - Signing root cert ASN1 DER content: %d bytes", len(signingRoot.Raw))
+	toBeMeasured = append(toBeMeasured, httpsRoots.Subjects()...)
+	debug(" - HTTPS roots: %d certificates", len(httpsRoots.Subjects()))
+
+	// try to measure
+	if err = measureTPM(toBeMeasured...); err != nil {
+		info("TPM measurements failed: %v", err)
 	}
 
 	//////////
@@ -300,57 +331,18 @@ func main() {
 		debug("Dryrun mode: will not boot")
 		return
 	}
-	info("Loading operating system into memory: \n%s", osi.String())
-	err = osi.Load(*doDebug)
+	info("Loading boot image into memory")
+	err = bootImg.Load(*doDebug)
 	if err != nil {
 		reboot("%s", err)
 	}
-	info("Handing over controll now")
+	info("Handing over controll - kexec")
 	err = boot.Execute()
 	if err != nil {
 		reboot("%v", err)
 	}
 
 	reboot("unexpected return from kexec")
-
-}
-
-func extractOS(ospkg *stboot.OSPackage) (boot.OSImage, error) {
-	debug("Looking for operating system with TXT")
-	txt := true
-	osiTXT, err := ospkg.OSImage(txt)
-	if err != nil {
-		debug("%v", err)
-	}
-	debug("Looking for non-TXT fallback operating system")
-	osiFallback, err := ospkg.OSImage(!txt)
-	if err != nil {
-		debug("%v", err)
-	}
-
-	switch {
-	case osiTXT != nil && osiFallback != nil && txtSupportedByHost:
-		info("Choosing operating system with TXT")
-		return osiTXT, nil
-	case osiTXT != nil && osiFallback != nil && !txtSupportedByHost:
-		info("Choosing non-TXT fallback operating system")
-		return osiFallback, nil
-	case osiTXT != nil && osiFallback == nil && txtSupportedByHost:
-		info("Choosing operating system with TXT")
-		return osiTXT, nil
-	case osiTXT != nil && osiFallback == nil && !txtSupportedByHost:
-		return nil, fmt.Errorf("TXT not supported by host, no fallback OS provided by OS package")
-	case osiTXT == nil && osiFallback != nil && txtSupportedByHost:
-		info("Choosing non-TXT fallback operating system")
-		return osiFallback, nil
-	case osiTXT == nil && osiFallback != nil && !txtSupportedByHost:
-		info("Choosing non-TXT fallback operating system")
-		return osiFallback, nil
-	case osiTXT == nil && osiFallback == nil:
-		return nil, fmt.Errorf("No operating system found in OS package")
-	default:
-		return nil, fmt.Errorf("Unexpected error while extracting OS")
-	}
 }
 
 func markCurrentOSpkg(file string) {

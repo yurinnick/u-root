@@ -48,3 +48,12 @@ func loadHostConfig(path string) (*HostConfig, error) {
 	}
 	return &hc, nil
 }
+
+// Bytes serializes a manifest stuct into JSON bytes.
+func (hc *HostConfig) Bytes() ([]byte, error) {
+	buf, err := json.Marshal(hc)
+	if err != nil {
+		return nil, fmt.Errorf("host config: serializing failed: %v", err)
+	}
+	return buf, nil
+}

@@ -99,6 +99,10 @@ func (m *OSManifest) Validate() error {
 	if m.KernelPath == "" {
 		return errors.New("manifest: missing kernel path")
 	}
+	// Initramfs path is mandatory
+	if m.InitramfsPath == "" {
+		return errors.New("manifest: missing initramfs path")
+	}
 	// tboot
 	if m.TbootPath != "" && len(m.ACMPaths) == 0 {
 		return errors.New("manifest: tboot provided but missing ACM")

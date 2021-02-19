@@ -44,3 +44,12 @@ func loadSecurityConfig(path string) (*SecurityConfig, error) {
 	}
 	return &sc, nil
 }
+
+// Bytes serializes a manifest stuct into JSON bytes.
+func (sc *SecurityConfig) Bytes() ([]byte, error) {
+	buf, err := json.Marshal(hc)
+	if err != nil {
+		return nil, fmt.Errorf("security config: serializing failed: %v", err)
+	}
+	return buf, nil
+}

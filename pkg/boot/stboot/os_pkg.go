@@ -141,29 +141,39 @@ func NewOSPackage(archiveZIP, descriptorJSON []byte) (*OSPackage, error) {
 }
 
 func (ospkg *OSPackage) validate() error {
-	// Manifest
+	// manifest
 	if ospkg.manifest == nil {
 		return fmt.Errorf("missing manifest data")
 	} else if err := ospkg.manifest.Validate(); err != nil {
 		return err
 	}
-	// Descriptor
+	// descriptor
 	if ospkg.descriptor == nil {
 		return fmt.Errorf("missing descriptor data")
 	} else if err := ospkg.descriptor.Validate(); err != nil {
 		return err
 	}
-	// Kernel
+	// kernel is mandatory
 	if len(ospkg.kernel) == 0 {
 		return fmt.Errorf("missing kernel")
+	}
+	// initrmafs is mandatory
+	if len(ospkg.initramfs) == 0 {
+		return fmt.Errorf("missing initramfs")
+	}
+	// tboot
+	if len(ospkg.tboot) != 0 && len(ospkg.acms) == 0 {
+		return fmt.Errorf("tboot requires at least one ACM")
 	}
 	return nil
 }
 
 // ArchiveBytes return the zip compressed archive part of ospkg.
 func (ospkg *OSPackage) ArchiveBytes() ([]byte, error) {
-	if err := ospkg.zip(); err != nil {
-		return nil, fmt.Errorf("os package: %v", err)
+	if len(ospkg.raw) == 0 {
+		if err := ospkg.zip(); err != nil {
+			return nil, fmt.Errorf("os package: %v", err)
+		}
 	}
 	return ospkg.raw, nil
 }
@@ -387,61 +397,59 @@ func (ospkg *OSPackage) Verify(rootCert *x509.Certificate) (found, valid int, er
 	return found, valid, nil
 }
 
-// OSImage retunrns a boot.OSImage generated from ospkg's configuration
-func (ospkg *OSPackage) OSImage(txt bool) (boot.OSImage, error) {
+// OSImage parses a boot.OSImage from ospkg. If tryTboot is set to false
+// a boot.LinuxImage is returned. If tryTboot is true and ospk contains a
+// tboot setup, a boot.MultibootImage is returned, else a boot.LinuxImage
+//
+func (ospkg *OSPackage) OSImage(tryTboot bool) (boot.OSImage, error) {
 	if !ospkg.isVerified {
-		return nil, errors.New("os package: content not verified")
+		return nil, fmt.Errorf("os package: content not verified")
 	}
-
 	if err := ospkg.unzip(); err != nil {
 		return nil, fmt.Errorf("os package: %v", err)
 	}
-
 	if err := ospkg.validate(); err != nil {
 		return nil, fmt.Errorf("os package: %v", err)
 	}
 
-	if txt && ospkg.manifest.TbootPath == "" {
-		return nil, errors.New("OSPackage does not contain a TXT-ready configuration")
-	}
-
 	var osi boot.OSImage
-	if !txt {
-		osi = &boot.LinuxImage{
+	if tryTboot && len(ospkg.tboot) >= 0 {
+		// multiboot image
+		var modules []multiboot.Module
+		kernel := multiboot.Module{
+			Module:  bytes.NewReader(ospkg.kernel),
+			Cmdline: "os-kernel " + ospkg.manifest.Cmdline,
+		}
+		modules = append(modules, kernel)
+
+		initramfs := multiboot.Module{
+			Module:  bytes.NewReader(ospkg.initramfs),
+			Cmdline: "os-initramfs",
+		}
+		modules = append(modules, initramfs)
+
+		for n, a := range ospkg.acms {
+			acm := multiboot.Module{
+				Module:  bytes.NewReader(a),
+				Cmdline: fmt.Sprintf("ACM%d", n+1),
+			}
+			modules = append(modules, acm)
+		}
+
+		osi = &boot.MultibootImage{
 			Name:    ospkg.manifest.Label,
-			Kernel:  bytes.NewReader(ospkg.kernel),
-			Initrd:  bytes.NewReader(ospkg.initramfs),
-			Cmdline: ospkg.manifest.Cmdline,
+			Kernel:  bytes.NewReader(ospkg.tboot),
+			Cmdline: ospkg.manifest.TbootArgs,
+			Modules: modules,
 		}
-		return osi, nil
 	}
 
-	var modules []multiboot.Module
-	kernel := multiboot.Module{
-		Module:  bytes.NewReader(ospkg.kernel),
-		Cmdline: "OS-Kernel " + ospkg.manifest.Cmdline,
-	}
-	modules = append(modules, kernel)
-
-	initramfs := multiboot.Module{
-		Module:  bytes.NewReader(ospkg.initramfs),
-		Cmdline: "OS-Initramfs",
-	}
-	modules = append(modules, initramfs)
-
-	for n, a := range ospkg.acms {
-		acm := multiboot.Module{
-			Module:  bytes.NewReader(a),
-			Cmdline: fmt.Sprintf("ACM%d", n+1),
-		}
-		modules = append(modules, acm)
-	}
-
-	osi = &boot.MultibootImage{
+	// linuxboot image
+	osi = &boot.LinuxImage{
 		Name:    ospkg.manifest.Label,
-		Kernel:  bytes.NewReader(ospkg.tboot),
-		Cmdline: ospkg.manifest.TbootArgs,
-		Modules: modules,
+		Kernel:  bytes.NewReader(ospkg.kernel),
+		Initrd:  bytes.NewReader(ospkg.initramfs),
+		Cmdline: ospkg.manifest.Cmdline,
 	}
 	return osi, nil
 }

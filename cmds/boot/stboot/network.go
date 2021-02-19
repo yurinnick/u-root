@@ -191,7 +191,7 @@ func tryDownload(urls []string, file string) (dest string, err error) {
 }
 
 func download(url string, destination string) error {
-	roots, err := loadHTTPSCertificates()
+	roots, err := loadHTTPSCertificates() // TODO: use the one from early validation
 	if err != nil {
 		return fmt.Errorf("failed to load root certificate: %v", err)
 	}

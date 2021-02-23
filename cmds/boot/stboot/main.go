@@ -23,35 +23,40 @@ import (
 	"github.com/u-root/u-root/pkg/ulog"
 )
 
+// Flags
 var (
 	doDebug = flag.Bool("debug", false, "Print additional debug output")
 	klog    = flag.Bool("klog", false, "Print output to all attached consoles via the kernel log")
 	dryRun  = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
-
-	debug = func(string, ...interface{}) {}
-
-	sc *SecurityConfig
-	hc *HostConfig
 )
 
-// files at initramfs
+// Globals
+var (
+	debug          = func(string, ...interface{}) {}
+	securityConfig SecurityConfig
+	hostConfig     HostConfig
+	txtHostSuport  bool
+)
+
+// Files at initramfs
 const (
 	securityConfigFile = "/etc/security_configuration.json"
 	signingRootFile    = "/etc/ospkg_signing_root.pem"
 	httpsRootsFile     = "/etc/https_roots.pem"
 )
 
-// files at STBOOT partition
+// Files at STBOOT partition
 const (
 	hostConfigurationFile = "/host_configuration.json"
 )
 
-// files at STDATA partition
+// Files at STDATA partition
 const (
 	timeFixFile        = "stboot/etc/system_time_fix"
-	localOSPkgDir      = "stboot/os_pkgs/local/"
-	localBootOrderFile = "stboot/etc/local_boot_order"
 	currentOSPkgFile   = "stboot/etc/current_ospkg_pathname"
+	localOSPkgDir      = "stboot/os_pkgs/local/"
+	localBootOrderFile = "stboot/os_pkgs/local/boot_order"
+	networkOSpkgCache  = "stboot/os_pkgs/cache"
 )
 
 var banner = `
@@ -90,22 +95,27 @@ func main() {
 	info(banner)
 
 	/////////////////////////
-	// Security configuration
+	// Early validation
 	/////////////////////////
-	var err error
-	sc, err = loadSecurityConfig(securityConfigFile)
+
+	// Security Configuration
+	s, err := ioutil.ReadFile(securityConfigFile)
 	if err != nil {
-		reboot("Cannot find security_configuration.json: %v", err)
+		reboot("missing security config: %v", err)
 	}
+	if err = json.Unmarshal(s, &securityConfig); err != nil {
+		reboot("cannot parse security config: %v", err)
+	}
+	if err = securityConfig.Validate(); err != nil {
+		reboot("invalid security config: %v", err)
+	}
+
 	if *doDebug {
-		str, _ := json.MarshalIndent(sc, "", "  ")
+		str, _ := json.MarshalIndent(securityConfig, "", "  ")
 		info("Security configuration: %s", str)
 	}
 
-	////////////////////////////
 	// Signing root certificate
-	////////////////////////////
-
 	pemBytes, err := ioutil.ReadFile(signingRootFile)
 	if err != nil {
 		reboot("loading signing root cert failed: %v", err)
@@ -124,11 +134,9 @@ func main() {
 		reboot("parsing signing root cert failed: %v", err)
 	}
 
-	////////////////////////////
-	// https root certificates
-	////////////////////////////
+	// HTTPS root certificates
 	httpsRoots := x509.NewCertPool()
-	if sc.BootMode == Network {
+	if securityConfig.BootMode == Network {
 		pemBytes, err = ioutil.ReadFile(httpsRootsFile)
 		if err != nil {
 			reboot("loading https root certs failed: %v", err)
@@ -138,38 +146,34 @@ func main() {
 		}
 	}
 
-	//////////////////////////////
-	// STBOOT and STDATA partition
-	//////////////////////////////
-	err = findBootPartition()
+	// Mount STBOOT partition
+	err = mountBootPartition()
 	if err != nil {
 		reboot("STBOOT partition: %v", err)
 	}
-	err = findDataPartition()
+
+	// Host configuration
+	p := filepath.Join(bootPartitionMountPoint, hostConfigurationFile)
+	bytes, err := ioutil.ReadFile(p)
+	if err != nil {
+		reboot("missing host config: %v", err)
+	}
+	err = json.Unmarshal(bytes, &hostConfig)
+	if err != nil {
+		reboot("cannot parse host config: %v", err)
+	}
+	if *doDebug {
+		str, _ := json.MarshalIndent(hostConfig, "", "  ")
+		info("Host configuration: %s", str)
+	}
+
+	// Mount STDATA partition
+	err = mountDataPartition()
 	if err != nil {
 		reboot("STDATA partition: %v", err)
 	}
 
-	/////////////////////
-	// Host configuration
-	/////////////////////
-	p := filepath.Join(bootPartitionMountPoint, hostConfigurationFile)
-	bytes, err := ioutil.ReadFile(p)
-	if err != nil {
-		reboot("Failed to load host_configuration.json: %v", err)
-	}
-	err = json.Unmarshal(bytes, &hc)
-	if err != nil {
-		reboot("Failed to unmarshal host_configuration.json: %v", err)
-	}
-	if *doDebug {
-		str, _ := json.MarshalIndent(hc, "", "  ")
-		info("Host configuration: %s", str)
-	}
-
-	////////////////////
-	// Time validatition
-	////////////////////
+	// System time
 	p = filepath.Join(dataPartitionMountPoint, timeFixFile)
 	timeFixRaw, err := ioutil.ReadFile(p)
 	if err != nil {
@@ -184,22 +188,57 @@ func main() {
 		reboot("%v", err)
 	}
 
-	////////////////
-	// TXT self test
-	////////////////
-	txtHostSuport := false
-	info("TXT self tests are not implementet yet.")
-	if txtHostSuport {
-		info("TXT is supported on this platform")
+	// Files and directories at STDATA partition
+	etcDir := filepath.Dir(currentOSPkgFile)
+	p = filepath.Join(dataPartitionMountPoint, etcDir)
+	stat, err := os.Stat(p)
+	if err != nil || !stat.IsDir() {
+		reboot("STDATA partition: missing directory %s", etcDir)
 	}
 
-	////////////////
+	if securityConfig.BootMode == Local {
+		p = filepath.Join(dataPartitionMountPoint, localOSPkgDir)
+		stat, err := os.Stat(p)
+		if err != nil || !stat.IsDir() {
+			reboot("STDATA partition: missing directory %s", localOSPkgDir)
+		}
+		p = filepath.Join(dataPartitionMountPoint, localBootOrderFile)
+		stat, err = os.Stat(p)
+		if err != nil {
+			reboot("STDATA partition: missing file %s", localBootOrderFile)
+		}
+	}
+
+	if securityConfig.BootMode == Network {
+		p = filepath.Join(dataPartitionMountPoint, networkOSpkgCache)
+		stat, err := os.Stat(p)
+		if err != nil || !stat.IsDir() {
+			reboot("STDATA partition: missing directory %s", networkOSpkgCache)
+		}
+	}
+
+	// TXT host support
+	info("TXT self tests are not implementet yet.")
+	txtHostSuport = false
+
+	// Init RNG
+	rngDev := "/dev/urandom"
+	info("Writing seed to %s", rngDev)
+	seed, err := hostConfig.ParseEntropySeed()
+	if err != nil {
+		reboot("parse entropy seed: %v", err)
+	}
+	if err := ioutil.WriteFile(rngDev, seed[:], 0); err != nil {
+		reboot("failed to init RNG: %v", err)
+	}
+
+	//////////////////
 	// Load OS package
-	////////////////
+	//////////////////
 
 	var ospkgFiles []string
 
-	switch sc.BootMode {
+	switch securityConfig.BootMode {
 	case Network:
 		f, err := loadOSPackageFromNetwork()
 		if err != nil {
@@ -213,7 +252,7 @@ func main() {
 		}
 		ospkgFiles = append(ospkgFiles, ff...)
 	default:
-		reboot("unsupported boot mode: %s", sc.BootMode.String())
+		reboot("unsupported boot mode: %s", securityConfig.BootMode.String())
 	}
 	if len(ospkgFiles) == 0 {
 		reboot("No OS packages found")
@@ -260,12 +299,13 @@ func main() {
 			debug("Error verifying OS package: %v", err)
 			continue
 		}
-		if valid < sc.MinimalSignaturesMatch {
-			debug("Not enough valid signatures: %d found, %d valid, %d required", n, valid, sc.MinimalSignaturesMatch)
+		threshold := securityConfig.MinimalSignaturesMatch
+		if valid < threshold {
+			debug("Not enough valid signatures: %d found, %d valid, %d required", n, valid, threshold)
 			continue
 		}
 
-		debug("Signatures: %d found, %d valid, %d required", n, valid, sc.MinimalSignaturesMatch)
+		debug("Signatures: %d found, %d valid, %d required", n, valid, threshold)
 		info("OS package passed verification")
 		info(check)
 
@@ -288,7 +328,7 @@ func main() {
 			reboot("unknown boot image type %T", t)
 		}
 
-		if sc.BootMode == Local {
+		if securityConfig.BootMode == Local {
 			markCurrentOSpkg(path)
 		}
 		break
@@ -306,7 +346,7 @@ func main() {
 
 	ospkgBytes, _ := ospkg.ArchiveBytes()
 	descriptorBytes, _ := ospkg.DescriptorBytes()
-	securityConfigBytes, _ := json.Marshal(sc)
+	securityConfigBytes, _ := json.Marshal(securityConfig)
 
 	toBeMeasured = append(toBeMeasured, ospkgBytes)
 	debug(" - OS package zip: %d bytes", len(ospkgBytes))
@@ -359,7 +399,7 @@ func markCurrentOSpkg(file string) {
 
 func loadOSPackageFromNetwork() (string, error) {
 	info("Setting up network interface")
-	switch hc.NetworkMode {
+	switch hostConfig.NetworkMode {
 	case Static:
 		err := configureStaticNetwork()
 		if err != nil {
@@ -372,7 +412,7 @@ func loadOSPackageFromNetwork() (string, error) {
 		}
 	}
 	info("Downloading OS package")
-	dest, err := tryDownload(hc.ProvisioningURLs, stboot.DefaultOSPackageName)
+	dest, err := tryDownload(hostConfig.ProvisioningURLs, stboot.DefaultOSPackageName)
 	if err != nil {
 		return "", fmt.Errorf("loading %s from provisioning servers: %v", stboot.DefaultOSPackageName, err)
 	}

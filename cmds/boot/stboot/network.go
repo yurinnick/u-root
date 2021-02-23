@@ -33,22 +33,15 @@ const (
 )
 
 func configureStaticNetwork() error {
-
-	if hc.HostIP == "" {
-		return errors.New("invald network configuration: missing host IP")
-	}
-	if hc.DefaultGateway == "" {
-		return errors.New("invald network configuration: missing default gateway")
-	}
-	info("Configure network interface with static IP: " + hc.HostIP)
-	addr, err := netlink.ParseAddr(hc.HostIP)
+	addr, err := hostConfig.ParseHostIP()
 	if err != nil {
-		return fmt.Errorf("error parsing HostIP string to CIDR format address: %v", err)
+		return fmt.Errorf("parsing host IP: %v", err)
 	}
-	gateway, err := netlink.ParseAddr(hc.DefaultGateway)
+	gateway, err := hostConfig.ParseDefaultGateway()
 	if err != nil {
-		return fmt.Errorf("error parsing DefaultGateway string to CIDR format address: %v", err)
+		return fmt.Errorf("parsing default gateway: %v", err)
 	}
+	info("Configure network interface with static IP: " + addr.String())
 	links, err := findNetworkInterfaces()
 	if err != nil {
 		return err
@@ -120,14 +113,7 @@ func configureDHCPNetwork() error {
 	return errors.New("DHCP configuration failed")
 }
 
-func setDNSServer() error {
-	if hc.DNSServer == "" {
-		return errors.New("missing dns server entry in network configuration file")
-	}
-	dns := net.ParseIP(hc.DNSServer)
-	if dns == nil {
-		return fmt.Errorf("cannot parse DNSServer string %s", hc.DNSServer)
-	}
+func setDNSServer(dns net.IP) error {
 	resolvconf := fmt.Sprintf("nameserver %s\n", dns.String())
 	if err := ioutil.WriteFile("/etc/resolv.conf", []byte(resolvconf), 0644); err != nil {
 		return fmt.Errorf("could not write DNS servers to resolv.conf: %v", err)

@@ -5,10 +5,10 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 )
+
+const SecurityConfigVersion int = 1
 
 //go:generate jsonenums -type=bootmode
 type bootmode int
@@ -29,27 +29,21 @@ type SecurityConfig struct {
 	MinimalSignaturesMatch int      `json:"minimal_signatures_match"`
 	BootMode               bootmode `json:"boot_mode"`
 	UsePkgCache            bool     `json:"use_ospkg_cache"`
+
+	isValid bool
 }
 
-// loadSecurityConfig parses security_configuration.json file.
-// It is expected to be in /etc.
-func loadSecurityConfig(path string) (*SecurityConfig, error) {
-	var sc SecurityConfig
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read file %s due to: %v", path, err)
+// Validate checks the integrety of sc.
+func (sc *SecurityConfig) Validate() error {
+	if sc.isValid {
+		return nil
 	}
-	if err = json.Unmarshal(data, &sc); err != nil {
-		return nil, fmt.Errorf("cannot parse data - invalid security configuration in %s:  %v", path, err)
+	if sc.Version != SecurityConfigVersion {
+		return fmt.Errorf("version missmatch, want %d, got %d", SecurityConfigVersion, sc.Version)
 	}
-	return &sc, nil
-}
-
-// Bytes serializes a manifest stuct into JSON bytes.
-func (sc *SecurityConfig) Bytes() ([]byte, error) {
-	buf, err := json.Marshal(hc)
-	if err != nil {
-		return nil, fmt.Errorf("security config: serializing failed: %v", err)
+	if sc.MinimalSignaturesMatch < 0 {
+		return fmt.Errorf("minimal signatures match cannot be negative")
 	}
-	return buf, nil
+	sc.isValid = true
+	return nil
 }

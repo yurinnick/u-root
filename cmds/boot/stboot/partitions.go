@@ -30,11 +30,11 @@ const (
 	bootPartitionMountPoint = "boot"
 )
 
-func findBootPartition() error {
+func mountBootPartition() error {
 	return findPartition(bootPartitionLabel, bootPartitionFSType, bootPartitionMountPoint, 60)
 }
 
-func findDataPartition() error {
+func mountDataPartition() error {
 	return findPartition(dataPartitionLabel, dataPartitionFSType, dataPartitionMountPoint, 60)
 }
 

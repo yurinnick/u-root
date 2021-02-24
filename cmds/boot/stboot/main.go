@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/stboot"
 	"github.com/u-root/u-root/pkg/recovery"
+	"github.com/u-root/u-root/pkg/uio"
 	"github.com/u-root/u-root/pkg/ulog"
 )
 
@@ -81,6 +83,12 @@ OS       //   //
   \\    //
    \\__//
 `
+
+type ospkgSampl struct {
+	name       string
+	descriptor io.ReadCloser
+	archive    io.ReadCloser
+}
 
 func main() {
 	log.SetPrefix("stboot: ")
@@ -188,7 +196,53 @@ func main() {
 		reboot("%v", err)
 	}
 
-	// Files and directories at STDATA partition
+	// boot order
+	var bootorder []string
+	if securityConfig.BootMode == Local {
+		p = filepath.Join(dataPartitionMountPoint, localBootOrderFile)
+		f, err := os.Open(p)
+		if err != nil {
+			reboot("STDATA partition: missing file %s", localBootOrderFile)
+		}
+
+		names := make([]string, 0)
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			names = append(names, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			reboot("scanning boot order file: %v", err)
+		}
+		f.Close()
+		if len(names) == 0 {
+			reboot("no boot order entries found")
+		}
+
+		for _, name := range names {
+			ext := filepath.Ext(name)
+			if ext == stboot.OSPackageExt || ext == stboot.DescriptorExt {
+				name = strings.TrimSuffix(name, ext)
+			}
+			p := filepath.Join(dataPartitionMountPoint, localOSPkgDir, name+stboot.OSPackageExt)
+			_, err := os.Stat(p)
+			if err != nil {
+				debug("skip %s: %v", name, err)
+				continue
+			}
+			p = filepath.Join(dataPartitionMountPoint, localOSPkgDir, name+stboot.DescriptorExt)
+			_, err = os.Stat(p)
+			if err != nil {
+				debug("skip %s: %v", name, err)
+				continue
+			}
+			bootorder = append(bootorder, name)
+		}
+		if len(bootorder) == 0 {
+			reboot("no valid boot order entries found")
+		}
+	}
+
+	// directories at STDATA partition
 	etcDir := filepath.Dir(currentOSPkgFile)
 	p = filepath.Join(dataPartitionMountPoint, etcDir)
 	stat, err := os.Stat(p)
@@ -201,11 +255,6 @@ func main() {
 		stat, err := os.Stat(p)
 		if err != nil || !stat.IsDir() {
 			reboot("STDATA partition: missing directory %s", localOSPkgDir)
-		}
-		p = filepath.Join(dataPartitionMountPoint, localBootOrderFile)
-		stat, err = os.Stat(p)
-		if err != nil {
-			reboot("STDATA partition: missing file %s", localBootOrderFile)
 		}
 	}
 
@@ -235,32 +284,33 @@ func main() {
 	//////////////////
 	// Load OS package
 	//////////////////
-
-	var ospkgFiles []string
+	var ospkgSampls []ospkgSampl
 
 	switch securityConfig.BootMode {
 	case Network:
-		f, err := loadOSPackageFromNetwork()
+		info("Loading OS package via network")
+		s, err := networkLoad()
 		if err != nil {
-			reboot("loading OS package failed: %v", err)
+			reboot("load OS package via network: %v", err)
 		}
-		ospkgFiles = append(ospkgFiles, f)
+		ospkgSampls = append(ospkgSampls, s)
 	case Local:
-		ff, err := loadOSPackageFromLocalStorage()
+		info("Loading OS package from disk")
+		ss, err := diskLoad(bootorder)
 		if err != nil {
-			reboot("loading OS package failed: %v", err)
+			reboot("load OS package from disk: %v", err)
 		}
-		ospkgFiles = append(ospkgFiles, ff...)
+		ospkgSampls = append(ospkgSampls, ss...)
 	default:
 		reboot("unsupported boot mode: %s", securityConfig.BootMode.String())
 	}
-	if len(ospkgFiles) == 0 {
+	if len(ospkgSampls) == 0 {
 		reboot("No OS packages found")
 	}
 	if *doDebug {
 		info("OS packages to be processed:")
-		for _, b := range ospkgFiles {
-			info(b)
+		for _, s := range ospkgSampls {
+			info(" - %s", s.name)
 		}
 	}
 
@@ -269,21 +319,19 @@ func main() {
 	//////////////////////
 	var bootImg boot.OSImage
 	var ospkg *stboot.OSPackage
-	for _, path := range ospkgFiles {
-		info("Opening OS package %s", path)
-		archive, err := ioutil.ReadFile(path)
+	for _, sample := range ospkgSampls {
+		info("Processing OS package %s", sample.name)
+		aBytes, err := ioutil.ReadAll(sample.archive)
 		if err != nil {
-			reboot("%v", err)
+			debug("read archive: %v", err)
 		}
-		dpath := strings.TrimSuffix(path, stboot.OSPackageExt)
-		dpath = dpath + stboot.DescriptorExt
-		descriptor, err := ioutil.ReadFile(dpath)
+		dBytes, err := ioutil.ReadAll(sample.descriptor)
 		if err != nil {
-			reboot("%v", err)
+			debug("read archive: %v", err)
 		}
-		ospkg, err = stboot.NewOSPackage(archive, descriptor)
+		ospkg, err = stboot.NewOSPackage(aBytes, dBytes)
 		if err != nil {
-			debug("%v", err)
+			debug("create OS package: %v", err)
 			continue
 		}
 
@@ -314,7 +362,8 @@ func main() {
 		/////////////
 		bootImg, err = ospkg.OSImage(txtHostSuport)
 		if err != nil {
-			reboot("error parsing boot image: %v", err)
+			debug("get boot image: %v", err)
+			continue
 		}
 		switch t := bootImg.(type) {
 		case *boot.LinuxImage:
@@ -325,11 +374,12 @@ func main() {
 		case *boot.MultibootImage:
 			debug("got tboot multiboot image from os package")
 		default:
-			reboot("unknown boot image type %T", t)
+			debug("unknown boot image type %T", t)
+			continue
 		}
 
 		if securityConfig.BootMode == Local {
-			markCurrentOSpkg(path)
+			markCurrentOSpkg(sample.name)
 		}
 		break
 	} // end process-os-pkgs-loop
@@ -385,18 +435,16 @@ func main() {
 	reboot("unexpected return from kexec")
 }
 
-func markCurrentOSpkg(file string) {
+func markCurrentOSpkg(name string) {
 	f := filepath.Join(dataPartitionMountPoint, currentOSPkgFile)
-	rel, err := filepath.Rel(filepath.Dir(f), file)
-	if err != nil {
-		reboot("failed to indicate current OS package: %v", err)
-	}
-	rel = rel + string('\n')
-	if err = ioutil.WriteFile(f, []byte(rel), os.ModePerm); err != nil {
-		reboot("failed to indicate current OS package: %v", err)
+	current := filepath.Join(dataPartitionMountPoint, localOSPkgDir, name)
+	current = current + string('\n')
+	if err := ioutil.WriteFile(f, []byte(current), os.ModePerm); err != nil {
+		reboot("write current OS package: %v", err)
 	}
 }
 
+// DEPRECATED
 func loadOSPackageFromNetwork() (string, error) {
 	info("Setting up network interface")
 	switch hostConfig.NetworkMode {
@@ -419,30 +467,39 @@ func loadOSPackageFromNetwork() (string, error) {
 	return dest, nil
 }
 
-func loadOSPackageFromLocalStorage() ([]string, error) {
-	f := filepath.Join(dataPartitionMountPoint, localBootOrderFile)
-	return parseLocalBootOrder(f)
+func networkLoad() (ospkgSampl, error) {
+	return ospkgSampl{}, nil
 }
 
-func parseLocalBootOrder(bootOrderFile string) ([]string, error) {
-	ret := make([]string, 0)
-
-	f, err := os.Open(bootOrderFile)
-	if err != nil {
-		return ret, err
+func diskLoad(names []string) ([]ospkgSampl, error) {
+	var samples = make([]ospkgSampl, 0)
+	dir := filepath.Join(dataPartitionMountPoint, localOSPkgDir)
+	if len(names) == 0 {
+		return samples, fmt.Errorf("names must not be empty")
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		p := filepath.Join(dataPartitionMountPoint, localOSPkgDir, scanner.Text())
-		ret = append(ret, p)
+	for _, name := range names {
+		ap := filepath.Join(dir, name+stboot.OSPackageExt)
+		dp := filepath.Join(dir, name+stboot.DescriptorExt)
+		if _, err := os.Stat(ap); err != nil {
+			return samples, err
+		}
+		if _, err := os.Stat(dp); err != nil {
+			return samples, err
+		}
+		ar := uio.NewLazyOpener(func() (io.Reader, error) {
+			return os.Open(ap)
+		})
+		dr := uio.NewLazyOpener(func() (io.Reader, error) {
+			return os.Open(dp)
+		})
+		s := ospkgSampl{
+			name:       name,
+			archive:    ar,
+			descriptor: dr,
+		}
+		samples = append(samples, s)
 	}
-
-	if err := scanner.Err(); err != nil {
-		return ret, err
-	}
-	return ret, nil
+	return samples, nil
 }
 
 //reboot trys to reboot the system in an infinity loop

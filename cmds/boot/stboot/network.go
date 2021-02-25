@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -196,22 +195,6 @@ func download(url *url.URL) ([]byte, error) {
 	return ret, nil
 }
 
-// loadHTTPSCertificate loads the certificate needed
-// for HTTPS and verifies it.
-func loadHTTPSCertificates() (*x509.CertPool, error) {
-	roots := x509.NewCertPool()
-	bytes, err := ioutil.ReadFile(httpsRootsFile)
-	if err != nil {
-		return roots, err
-	}
-
-	ok := roots.AppendCertsFromPEM(bytes)
-	if !ok {
-		return roots, fmt.Errorf("error parsing %s", httpsRootsFile)
-	}
-	return roots, nil
-}
-
 func checkEntropy() {
 	e, err := ioutil.ReadFile(entropyAvail)
 	if err != nil {
@@ -224,8 +207,6 @@ func checkEntropy() {
 	}
 	if entr < 128 {
 		info("WARNING: low entropy:")
-	} else {
-		info("Entropy OK:")
+		info("%s : %d", entropyAvail, entr)
 	}
-	info("%s : %d", entropyAvail, entr)
 }

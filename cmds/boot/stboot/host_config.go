@@ -108,7 +108,7 @@ func (hc *HostConfig) Validate(network bool) error {
 				return fmt.Errorf("authentication: 32 hex-encoded bytes expected")
 			}
 		}
-		hc.isValidBasic = true
+		hc.isValidNetwork = true
 	}
 	return nil
 }

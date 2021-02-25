@@ -116,13 +116,12 @@ func main() {
 	if err = json.Unmarshal(s, &securityConfig); err != nil {
 		reboot("cannot parse security config: %v", err)
 	}
-	if err = securityConfig.Validate(); err != nil {
-		reboot("invalid security config: %v", err)
-	}
-
 	if *doDebug {
 		str, _ := json.MarshalIndent(securityConfig, "", "  ")
 		info("Security configuration: %s", str)
+	}
+	if err = securityConfig.Validate(); err != nil {
+		reboot("invalid security config: %v", err)
 	}
 
 	// Signing root certificate
@@ -175,6 +174,9 @@ func main() {
 	if *doDebug {
 		str, _ := json.MarshalIndent(hostConfig, "", "  ")
 		info("Host configuration: %s", str)
+	}
+	if err = hostConfig.Validate(securityConfig.BootMode == Network); err != nil {
+		reboot("invalid host config: %v", err)
 	}
 
 	// Mount STDATA partition
@@ -493,9 +495,13 @@ func networkLoad() (ospkgSampl, error) {
 			debug("Skip %s: %v", url.String(), err)
 			continue
 		}
-		debug("parsing OS package URL")
+		debug("parsing OS package URL form descriptor")
+		if descriptor.PkgURL == "" {
+			debug("Skip %s: no OS package URL provided in descriptor")
+			continue
+		}
 		pkgURL, err := url.Parse(descriptor.PkgURL)
-		if err = descriptor.Validate(); err != nil {
+		if err != nil {
 			debug("Skip %s: %v", url.String(), err)
 			continue
 		}
@@ -505,7 +511,7 @@ func networkLoad() (ospkgSampl, error) {
 			continue
 		}
 		debug("downloading %s", pkgURL.String())
-		aBytes, err := download(url)
+		aBytes, err := download(pkgURL)
 		if err != nil {
 			debug("Skip %s: %v", url.String(), err)
 			continue
@@ -522,7 +528,7 @@ func networkLoad() (ospkgSampl, error) {
 		sample.descriptor = dr
 		return sample, nil
 	}
-	return sample, fmt.Errorf("cannot find a OS descriptor file under any provisioning URL")
+	return sample, fmt.Errorf("all provisioning URLs failed")
 }
 
 func diskLoad(names []string) ([]ospkgSampl, error) {

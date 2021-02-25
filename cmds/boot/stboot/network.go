@@ -10,10 +10,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -151,6 +153,34 @@ func findNetworkInterfaces() ([]netlink.Link, error) {
 	return links, nil
 }
 
+type ProgressReadCloser struct {
+	RC io.ReadCloser
+
+	Symbol   string
+	Interval int
+	W        io.Writer
+
+	counter int
+	written bool
+}
+
+func (rc *ProgressReadCloser) Read(p []byte) (n int, err error) {
+	defer func() {
+		numSymbols := (rc.counter%rc.Interval + n) / rc.Interval
+		rc.W.Write([]byte(strings.Repeat(rc.Symbol, numSymbols)))
+		rc.counter += n
+		rc.written = (rc.written || numSymbols > 0)
+		if err == io.EOF && rc.written {
+			rc.W.Write([]byte("\n"))
+		}
+	}()
+	return rc.RC.Read(p)
+}
+
+func (rc *ProgressReadCloser) Close() error {
+	return rc.RC.Close()
+}
+
 func download(url *url.URL) ([]byte, error) {
 	if httpsRoots == nil {
 		return nil, fmt.Errorf("no https root certifiates loaded")
@@ -187,6 +217,17 @@ func download(url *url.URL) ([]byte, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("response: %d", resp.StatusCode)
+	}
+	if *doDebug {
+		progress := func(rc io.ReadCloser) io.ReadCloser {
+			return &ProgressReadCloser{
+				RC:       rc,
+				Symbol:   ".",
+				Interval: 5 * 1024 * 1024,
+				W:        os.Stdout,
+			}
+		}
+		resp.Body = progress(resp.Body)
 	}
 	ret, err := ioutil.ReadAll(resp.Body)
 	if len(ret) == 0 {

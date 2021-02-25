@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -37,6 +38,7 @@ var (
 	debug          = func(string, ...interface{}) {}
 	securityConfig SecurityConfig
 	hostConfig     HostConfig
+	httpsRoots     *x509.CertPool
 	txtHostSuport  bool
 )
 
@@ -143,7 +145,7 @@ func main() {
 	}
 
 	// HTTPS root certificates
-	httpsRoots := x509.NewCertPool()
+	httpsRoots = x509.NewCertPool()
 	if securityConfig.BootMode == Network {
 		pemBytes, err = ioutil.ReadFile(httpsRootsFile)
 		if err != nil {
@@ -263,6 +265,22 @@ func main() {
 		stat, err := os.Stat(p)
 		if err != nil || !stat.IsDir() {
 			reboot("STDATA partition: missing directory %s", networkOSpkgCache)
+		}
+	}
+
+	// network interface
+	if securityConfig.BootMode == Network {
+		switch hostConfig.NetworkMode {
+		case Static:
+			if err := configureStaticNetwork(); err != nil {
+				reboot("cannot set up IO: %v", err)
+			}
+		case DHCP:
+			if err := configureDHCPNetwork(); err != nil {
+				reboot("cannot set up IO: %v", err)
+			}
+		default:
+			reboot("unknown network mode: %s", hostConfig.NetworkMode.String())
 		}
 	}
 
@@ -444,31 +462,67 @@ func markCurrentOSpkg(name string) {
 	}
 }
 
-// DEPRECATED
-func loadOSPackageFromNetwork() (string, error) {
-	info("Setting up network interface")
-	switch hostConfig.NetworkMode {
-	case Static:
-		err := configureStaticNetwork()
-		if err != nil {
-			return "", fmt.Errorf("cannot set up IO: %v", err)
-		}
-	case DHCP:
-		err := configureDHCPNetwork()
-		if err != nil {
-			return "", fmt.Errorf("cannot set up IO: %v", err)
-		}
-	}
-	info("Downloading OS package")
-	dest, err := tryDownload(hostConfig.ProvisioningURLs, stboot.DefaultOSPackageName)
-	if err != nil {
-		return "", fmt.Errorf("loading %s from provisioning servers: %v", stboot.DefaultOSPackageName, err)
-	}
-	return dest, nil
-}
-
 func networkLoad() (ospkgSampl, error) {
-	return ospkgSampl{}, nil
+	var sample ospkgSampl
+	urls, err := hostConfig.ParseProvisioningURLs()
+	if err != nil {
+		return sample, fmt.Errorf("pars URLs: %v", err)
+	}
+	if *doDebug {
+		info("Provisioning URLs:")
+		for _, u := range urls {
+			info(" - %s", u.String())
+		}
+	}
+
+	for _, url := range urls {
+		debug("downloading %s", url.String())
+		dBytes, err := download(url)
+		if err != nil {
+			debug("Skip %s: %v", url.String(), err)
+			continue
+		}
+		debug("parsing descriptor")
+		descriptor, err := stboot.DescriptorFromBytes(dBytes)
+		if err != nil {
+			debug("Skip %s: %v", url.String(), err)
+			continue
+		}
+		debug("validating descriptor")
+		if err = descriptor.Validate(); err != nil {
+			debug("Skip %s: %v", url.String(), err)
+			continue
+		}
+		debug("parsing OS package URL")
+		pkgURL, err := url.Parse(descriptor.PkgURL)
+		if err = descriptor.Validate(); err != nil {
+			debug("Skip %s: %v", url.String(), err)
+			continue
+		}
+		s := pkgURL.Scheme
+		if s == "" || s != "http" && s != "https" {
+			debug("Skip %s: missing or unsupported scheme in OS package URL %s", pkgURL.String())
+			continue
+		}
+		debug("downloading %s", pkgURL.String())
+		aBytes, err := download(url)
+		if err != nil {
+			debug("Skip %s: %v", url.String(), err)
+			continue
+		}
+		ar := uio.NewLazyOpener(func() (io.Reader, error) {
+			return bytes.NewReader(aBytes), nil
+		})
+		dr := uio.NewLazyOpener(func() (io.Reader, error) {
+			return bytes.NewReader(dBytes), nil
+		})
+
+		sample.name = url.String()
+		sample.archive = ar
+		sample.descriptor = dr
+		return sample, nil
+	}
+	return sample, fmt.Errorf("cannot find a OS descriptor file under any provisioning URL")
 }
 
 func diskLoad(names []string) ([]ospkgSampl, error) {

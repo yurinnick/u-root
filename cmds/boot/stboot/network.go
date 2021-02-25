@@ -11,14 +11,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +37,7 @@ func configureStaticNetwork() error {
 	if err != nil {
 		return fmt.Errorf("parsing default gateway: %v", err)
 	}
-	info("Configure network interface with static IP: " + addr.String())
+	info("Setup network interface with static IP: " + addr.String())
 	links, err := findNetworkInterfaces()
 	if err != nil {
 		return err
@@ -156,33 +152,15 @@ func findNetworkInterfaces() ([]netlink.Link, error) {
 	return links, nil
 }
 
-func tryDownload(urls []string, file string) (dest string, err error) {
-	dest = filepath.Join("/", file)
-	for _, rawurl := range urls {
-		url, err := url.Parse(rawurl)
-		if err != nil {
-			debug("Skip %s : %v", rawurl, err)
-			continue
-		}
-
-		url.Path = path.Join(url.Path, file)
-		err = download(url.String(), dest)
-		if err != nil {
-			debug("%v", err)
-			continue
-		}
-		return dest, nil
-	}
-	return "", fmt.Errorf("cannot find %s on provisioning servers", file)
-}
-
-func download(url string, destination string) error {
-	roots, err := loadHTTPSCertificates() // TODO: use the one from early validation
-	if err != nil {
-		return fmt.Errorf("failed to load root certificate: %v", err)
+func download(url *url.URL) ([]byte, error) {
+	if httpsRoots == nil {
+		return nil, fmt.Errorf("no https root certifiates loaded")
 	}
 
-	// setup https client
+	// setup client with values taken from http.DefaultTransport + RootCAs
+	tls := &tls.Config{
+		RootCAs: httpsRoots,
+	}
 	client := http.Client{
 		Transport: (&http.Transport{
 			Proxy: http.ProxyFromEnvironment,
@@ -195,48 +173,27 @@ func download(url string, destination string) error {
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-			TLSClientConfig: (&tls.Config{
-				RootCAs: roots,
-			}),
+			TLSClientConfig:       tls,
 		}),
 	}
 
-	// check available kernel entropy
-	e, err := ioutil.ReadFile(entropyAvail)
-	if err != nil {
-		return fmt.Errorf("cannot evaluate entropy, %v", err)
+	if *doDebug {
+		checkEntropy()
 	}
-	es := strings.TrimSpace(string(e))
-	entr, err := strconv.Atoi(es)
+
+	resp, err := client.Get(url.String())
 	if err != nil {
-		return fmt.Errorf("cannot evaluate entropy, %v", err)
-	}
-	if entr < 128 {
-		debug("WARNING: low entropy!")
-		debug("%s : %d", entropyAvail, entr)
-	}
-	// get remote boot bundle
-	info("Downloading %s", url)
-	resp, err := client.Get(url)
-	if err != nil {
-		return fmt.Errorf("HTTPS client: %v", err)
+		return nil, fmt.Errorf("client: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTPS client: %d", resp.StatusCode)
+		return nil, fmt.Errorf("response: %d", resp.StatusCode)
 	}
-	f, err := os.Create(destination)
-	if err != nil {
-		return fmt.Errorf("Download: %v", err)
+	ret, err := ioutil.ReadAll(resp.Body)
+	if len(ret) == 0 {
+		return nil, fmt.Errorf("empty response")
 	}
-	defer f.Close()
-
-	_, err = io.Copy(f, resp.Body)
-	if err != nil {
-		return fmt.Errorf("Download: %v", err)
-	}
-
-	return nil
+	return ret, nil
 }
 
 // loadHTTPSCertificate loads the certificate needed
@@ -253,4 +210,22 @@ func loadHTTPSCertificates() (*x509.CertPool, error) {
 		return roots, fmt.Errorf("error parsing %s", httpsRootsFile)
 	}
 	return roots, nil
+}
+
+func checkEntropy() {
+	e, err := ioutil.ReadFile(entropyAvail)
+	if err != nil {
+		info("entropy check failed, %v", err)
+	}
+	es := strings.TrimSpace(string(e))
+	entr, err := strconv.Atoi(es)
+	if err != nil {
+		info("entropy check failed, %v", err)
+	}
+	if entr < 128 {
+		info("WARNING: low entropy:")
+	} else {
+		info("Entropy OK:")
+	}
+	info("%s : %d", entropyAvail, entr)
 }

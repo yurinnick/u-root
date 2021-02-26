@@ -351,10 +351,12 @@ func main() {
 		aBytes, err := ioutil.ReadAll(sample.archive)
 		if err != nil {
 			debug("read archive: %v", err)
+			continue
 		}
 		dBytes, err := ioutil.ReadAll(sample.descriptor)
 		if err != nil {
 			debug("read archive: %v", err)
+			continue
 		}
 		ospkg, err = stboot.NewOSPackage(aBytes, dBytes)
 		if err != nil {
@@ -410,6 +412,10 @@ func main() {
 		}
 		break
 	} // end process-os-pkgs-loop
+	for _, s := range ospkgSampls {
+		s.archive.Close()
+		s.descriptor.Close()
+	}
 	if bootImg == nil {
 		reboot("No usable OS package")
 	}

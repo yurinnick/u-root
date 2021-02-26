@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/url"
 	"path/filepath"
 	"time"
 
@@ -52,7 +53,6 @@ func CreateOSPackage(label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs
 
 	var d = &Descriptor{
 		Version: DescriptorVersion,
-		PkgURL:  pkgURL,
 	}
 
 	var ospkg = &OSPackage{
@@ -63,6 +63,17 @@ func CreateOSPackage(label, pkgURL, kernel, initramfs, cmdline, tboot, tbootArgs
 	}
 
 	var err error
+	if pkgURL != "" {
+		u, err := url.Parse(pkgURL)
+		if err != nil {
+			return nil, fmt.Errorf("os package: OS package URL: %v", err)
+		}
+		if u.Scheme == "" || u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("os package: OS package URL: missing or unsupported scheme in %s", u.String())
+		}
+		ospkg.descriptor.PkgURL = pkgURL
+	}
+
 	if kernel != "" {
 		ospkg.kernel, err = ioutil.ReadFile(kernel)
 		if err != nil {

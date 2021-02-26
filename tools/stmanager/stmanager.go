@@ -40,7 +40,7 @@ var (
 	create          = kingpin.Command("create", "Create a OS package from the provided operating system files")
 	createOut       = create.Flag("out", "OS package output path. Two files will be created: the archive ZIP file and the descriptor JSON file. A directory or a filename can be passed. In case of a filenema the file extensions will be set propperly. Default name is "+DefaultOutName).String()
 	createLabel     = create.Flag("label", "Short description of the boot configuration. Defaults to 'System Tarnsparency OS package <kernel>'").String()
-	createPkgURL    = create.Flag("pkg-url", "URL of the OS package in case of network boot mode").String()
+	createPkgURL    = create.Flag("url", "URL of the OS package zip file in case of network boot mode").String()
 	createKernel    = create.Flag("kernel", "Operation system kernel").Required().ExistingFile()
 	createInitramfs = create.Flag("initramfs", "Operation system initramfs").ExistingFile()
 	createCmdline   = create.Flag("cmd", "Kernel command line").String()

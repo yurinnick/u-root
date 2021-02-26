@@ -442,7 +442,7 @@ func main() {
 		return
 	}
 	info("Loading boot image into memory")
-	err = bootImg.Load(*doDebug)
+	err = bootImg.Load(false)
 	if err != nil {
 		reboot("%s", err)
 	}

@@ -93,6 +93,7 @@ type ospkgSampl struct {
 }
 
 func main() {
+	log.SetFlags(0) // no time or date
 	log.SetPrefix("stboot: ")
 	ulog.KernelLog.SetLogLevel(ulog.KLogNotice)
 	ulog.KernelLog.SetConsoleLogLevel(ulog.KLogInfo)

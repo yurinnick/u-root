@@ -113,7 +113,7 @@ func configureDHCPNetwork() error {
 func setDNSServer(dns net.IP) error {
 	resolvconf := fmt.Sprintf("nameserver %s\n", dns.String())
 	if err := ioutil.WriteFile("/etc/resolv.conf", []byte(resolvconf), 0644); err != nil {
-		return fmt.Errorf("could not write DNS servers to resolv.conf: %v", err)
+		return fmt.Errorf("write resolv.conf: %v", err)
 	}
 	return nil
 }

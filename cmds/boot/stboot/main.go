@@ -285,6 +285,12 @@ func main() {
 		default:
 			reboot("unknown network mode: %s", hostConfig.NetworkMode.String())
 		}
+		if hostConfig.DNSServer != nil {
+			info("set DNS Server %s", hostConfig.DNSServer.String())
+			if err := setDNSServer(hostConfig.DNSServer); err != nil {
+				reboot("set DNS Server: %v", err)
+			}
+		}
 	}
 
 	// TXT host support

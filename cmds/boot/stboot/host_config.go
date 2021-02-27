@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 )
@@ -66,11 +67,33 @@ func (hc *HostConfig) Validate(network bool) error {
 		hc.isValidBasic = true
 	}
 	if network && !hc.isValidNetwork {
+		// identity is optional
+		if hc.ID != "" {
+			e, err := hex.DecodeString(hc.ID)
+			if err != nil || len(e) != 32 {
+				return fmt.Errorf("identity: 32 hex-encoded bytes expected")
+			}
+		}
+		// authentication is optional
+		if hc.Auth != "" {
+			e, err := hex.DecodeString(hc.Auth)
+			if err != nil || len(e) != 32 {
+				return fmt.Errorf("authentication: 32 hex-encoded bytes expected")
+			}
+		}
 		// absolute provisioning URLs
 		if len(hc.ProvisioningURLs) == 0 {
 			return fmt.Errorf("missing provisioning URLs")
 		}
 		for _, u := range hc.ProvisioningURLs {
+			if strings.Contains(u, "$ID") && hc.ID == "" {
+				return fmt.Errorf("provisioning URLs: identity not provided in host config for replacing $ID in %s", u)
+			}
+			if strings.Contains(u, "$AUTH") && hc.Auth == "" {
+				return fmt.Errorf("provisioning URLs: authentication not provided in host config for replacing $AUTH in %s", u)
+			}
+			u = strings.ReplaceAll(u, "$ID", hc.ID)
+			u = strings.ReplaceAll(u, "$AUTH", hc.Auth)
 			url, err := url.Parse(u)
 			if err != nil {
 				return fmt.Errorf("provisioning URLs: %v", err)
@@ -93,20 +116,6 @@ func (hc *HostConfig) Validate(network bool) error {
 				return fmt.Errorf("default gateway: %v", err)
 			}
 			hc.defaultGateway = a
-		}
-		// identity is optional
-		if hc.ID != "" {
-			e, err := hex.DecodeString(hc.ID)
-			if err != nil || len(e) != 32 {
-				return fmt.Errorf("identity: 32 hex-encoded bytes expected")
-			}
-		}
-		// authentication is optional
-		if hc.Auth != "" {
-			e, err := hex.DecodeString(hc.Auth)
-			if err != nil || len(e) != 32 {
-				return fmt.Errorf("authentication: 32 hex-encoded bytes expected")
-			}
 		}
 		hc.isValidNetwork = true
 	}

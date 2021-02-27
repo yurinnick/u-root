@@ -16,6 +16,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -536,7 +537,11 @@ func networkLoad() (ospkgSampl, error) {
 			return bytes.NewReader(dBytes), nil
 		})
 
-		sample.name = url.String()
+		if pkgURL.Path != "" && url.Path[len(pkgURL.Path)-1] != '/' {
+			sample.name = path.Base(pkgURL.Path)
+		} else {
+			sample.name = "unnamed network OS package"
+		}
 		sample.archive = ar
 		sample.descriptor = dr
 		return sample, nil

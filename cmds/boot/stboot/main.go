@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -498,6 +499,7 @@ func networkLoad() (ospkgSampl, error) {
 			debug("Skip %s: %v", url.String(), err)
 			continue
 		}
+		debug("content type: %s", http.DetectContentType(dBytes))
 		debug("parsing descriptor")
 		descriptor, err := stboot.DescriptorFromBytes(dBytes)
 		if err != nil {
@@ -530,6 +532,7 @@ func networkLoad() (ospkgSampl, error) {
 			debug("Skip %s: %v", url.String(), err)
 			continue
 		}
+		debug("content type: %s", http.DetectContentType(aBytes))
 		ar := uio.NewLazyOpener(func() (io.Reader, error) {
 			return bytes.NewReader(aBytes), nil
 		})

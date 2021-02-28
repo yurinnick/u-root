@@ -39,7 +39,7 @@ var (
 	debug          = func(string, ...interface{}) {}
 	securityConfig SecurityConfig
 	hostConfig     HostConfig
-	httpsRoots     *x509.CertPool
+	httpsRoots     []*x509.Certificate
 	txtHostSuport  bool
 )
 
@@ -146,33 +146,44 @@ func main() {
 	}
 
 	// HTTPS root certificates
-	httpsRoots = x509.NewCertPool()
 	if securityConfig.BootMode == Network {
 		pemBytes, err = ioutil.ReadFile(httpsRootsFile)
 		if err != nil {
 			reboot("loading https root certs failed: %v", err)
 		}
-		if ok := httpsRoots.AppendCertsFromPEM(pemBytes); !ok {
-			reboot("parsing https root certs failed")
-		}
-		if *doDebug {
-			for n, derBytes := range httpsRoots.Subjects() {
-				info("HTTPS root certificate %d: ", n+1)
-				c, err := x509.ParseCertificate(derBytes)
-				if err != nil {
-					info("error: %v", err)
-				} else {
-					info("HTTPS root certificate %d: ", n+1)
-					info("Version: %d", c.Version)
-					info("SerialNumber: %v", c.Issuer.SerialNumber)
-					issuer, _ := json.MarshalIndent(c.Issuer, "", "  ")
-					info("Issuer: %s", issuer)
-					subject, _ := json.MarshalIndent(c.Subject, "", "  ")
-					info("Subject: %s", subject)
-					info("Valid from: %s", c.NotBefore.String())
-					info("Valid until: %s", c.NotAfter.String())
-				}
+		for len(pemBytes) > 0 {
+			var block *pem.Block
+			var n = 1
+			block, pemBytes = pem.Decode(pemBytes)
+			if block == nil {
+				break
 			}
+			if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+				continue
+			}
+			certBytes := block.Bytes
+			c, err := x509.ParseCertificate(certBytes)
+			if err != nil {
+				continue
+			}
+			if *doDebug {
+				info("HTTPS root certificate %d: ", n)
+				info("  Version: %d", c.Version)
+				info("  SerialNumber: %s", c.Issuer.SerialNumber)
+				info("  Issuer:")
+				info("    Organization: %s, %s", c.Issuer.Organization, c.Issuer.Country)
+				info("    Common Name: %s", c.Issuer.CommonName)
+				info("  Subject:")
+				info("    Organization: %s, %s", c.Subject.Organization, c.Subject.Country)
+				info("    Common Name: %s", c.Subject.CommonName)
+				info("  Valid from: %s", c.NotBefore.String())
+				info("  Valid until: %s", c.NotAfter.String())
+			}
+			httpsRoots = append(httpsRoots, c)
+			n++
+		}
+		if len(httpsRoots) == 0 {
+			reboot("no https root certifiates in %s", httpsRootsFile)
 		}
 	}
 
@@ -493,8 +504,10 @@ func main() {
 	debug(" - Security configuration json: %d bytes", len(securityConfigBytes))
 	toBeMeasured = append(toBeMeasured, signingRoot.Raw)
 	debug(" - Signing root cert ASN1 DER content: %d bytes", len(signingRoot.Raw))
-	toBeMeasured = append(toBeMeasured, httpsRoots.Subjects()...)
-	debug(" - HTTPS roots: %d certificates", len(httpsRoots.Subjects()))
+	for n, c := range httpsRoots {
+		toBeMeasured = append(toBeMeasured, c.Raw)
+		debug(" - HTTPS root %d: %d bytes", n, len(c.Raw))
+	}
 
 	// try to measure
 	if err = measureTPM(toBeMeasured...); err != nil {

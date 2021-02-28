@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -182,13 +183,17 @@ func (rc *ProgressReadCloser) Close() error {
 }
 
 func download(url *url.URL) ([]byte, error) {
-	if httpsRoots == nil {
+	if len(httpsRoots) == 0 {
 		return nil, fmt.Errorf("no https root certifiates loaded")
 	}
 
 	// setup client with values taken from http.DefaultTransport + RootCAs
+	roots := x509.NewCertPool()
+	for _, cert := range httpsRoots {
+		roots.AddCert(cert)
+	}
 	tls := &tls.Config{
-		RootCAs: httpsRoots,
+		RootCAs: roots,
 	}
 	client := http.Client{
 		Transport: (&http.Transport{

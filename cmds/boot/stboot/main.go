@@ -435,9 +435,16 @@ func main() {
 			}
 		}
 
+		var currentPkgPath string
 		if securityConfig.BootMode == Local {
-			markCurrentOSpkg(sample.name)
+			currentPkgPath = filepath.Join(dataPartitionMountPoint, localOSPkgDir, sample.name)
+		} else if securityConfig.BootMode == Network && securityConfig.UsePkgCache {
+			currentPkgPath = filepath.Join(dataPartitionMountPoint, networkOSpkgCache, sample.name)
+		} else {
+			currentPkgPath = "UNCACHED_NETWORK_OS_PACKAGE"
 		}
+		markCurrentOSpkg(currentPkgPath)
+
 		break
 	} // end process-os-pkgs-loop
 	for _, s := range ospkgSampls {
@@ -496,10 +503,9 @@ func main() {
 	reboot("unexpected return from kexec")
 }
 
-func markCurrentOSpkg(name string) {
+func markCurrentOSpkg(pkgPath string) {
 	f := filepath.Join(dataPartitionMountPoint, currentOSPkgFile)
-	current := filepath.Join(dataPartitionMountPoint, localOSPkgDir, name)
-	current = current + string('\n')
+	current := pkgPath + string('\n')
 	if err := ioutil.WriteFile(f, []byte(current), os.ModePerm); err != nil {
 		reboot("write current OS package: %v", err)
 	}

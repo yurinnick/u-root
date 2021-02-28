@@ -155,6 +155,25 @@ func main() {
 		if ok := httpsRoots.AppendCertsFromPEM(pemBytes); !ok {
 			reboot("parsing https root certs failed")
 		}
+		if *doDebug {
+			for n, derBytes := range httpsRoots.Subjects() {
+				info("HTTPS root certificate %d: ", n+1)
+				c, err := x509.ParseCertificate(derBytes)
+				if err != nil {
+					info("error: %v", err)
+				} else {
+					info("HTTPS root certificate %d: ", n+1)
+					info("Version: %d", c.Version)
+					info("SerialNumber: %v", c.Issuer.SerialNumber)
+					issuer, _ := json.MarshalIndent(c.Issuer, "", "  ")
+					info("Issuer: %s", issuer)
+					subject, _ := json.MarshalIndent(c.Subject, "", "  ")
+					info("Subject: %s", subject)
+					info("Valid from: %s", c.NotBefore.String())
+					info("Valid until: %s", c.NotAfter.String())
+				}
+			}
+		}
 	}
 
 	// Mount STBOOT partition

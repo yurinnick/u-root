@@ -17,7 +17,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -409,6 +408,33 @@ func main() {
 			continue
 		}
 
+		// write cache
+		if securityConfig.BootMode == Network && securityConfig.UsePkgCache {
+			dir := filepath.Join(dataPartitionMountPoint, networkOSpkgCache)
+			debug("caching OS package in %s", dir)
+			// clear
+			d, err := os.Open(dir)
+			if err != nil {
+				reboot("clear cache: %v", err)
+			}
+			defer d.Close()
+			names, err := d.Readdirnames(-1)
+			if err != nil {
+				reboot("clear cache: %v", err)
+			}
+			for _, name := range names {
+				err = os.RemoveAll(filepath.Join(dir, name))
+				if err != nil {
+					reboot("clear cache: %v", err)
+				}
+			}
+			// write
+			p := filepath.Join(dir, sample.name)
+			if err := ioutil.WriteFile(p, aBytes, 0666); err != nil {
+				reboot("write pkg cache: %v", err)
+			}
+		}
+
 		if securityConfig.BootMode == Local {
 			markCurrentOSpkg(sample.name)
 		}
@@ -506,6 +532,13 @@ func networkLoad() (ospkgSampl, error) {
 			debug("Skip %s: %v", url.String(), err)
 			continue
 		}
+		if *doDebug {
+			info("Package descriptor:")
+			info("  Version: %d", descriptor.Version)
+			info("  Package URL: %s", descriptor.PkgURL)
+			info("  %d signature(s)", len(descriptor.Signatures))
+			info("  %d certificate(s)", len(descriptor.Certificates))
+		}
 		debug("validating descriptor")
 		if err = descriptor.Validate(); err != nil {
 			debug("Skip %s: %v", url.String(), err)
@@ -526,25 +559,53 @@ func networkLoad() (ospkgSampl, error) {
 			debug("Skip %s: missing or unsupported scheme in OS package URL %s", pkgURL.String())
 			continue
 		}
-		debug("downloading %s", pkgURL.String())
-		aBytes, err := download(pkgURL)
-		if err != nil {
-			debug("Skip %s: %v", url.String(), err)
+		filename := filepath.Base(pkgURL.Path)
+		if ext := filepath.Ext(filename); ext != stboot.OSPackageExt {
+			debug("Skip %s: package URL must contain a path to a %s file: %s", stboot.OSPackageExt, pkgURL.String())
 			continue
 		}
-		debug("content type: %s", http.DetectContentType(aBytes))
+
+		var aBytes []byte
+		if securityConfig.UsePkgCache {
+			debug("look up pkg cache")
+			dir := filepath.Join(dataPartitionMountPoint, networkOSpkgCache)
+			fis, err := ioutil.ReadDir(dir)
+			if err != nil {
+				reboot("read cache: %v", err)
+			}
+			for _, fi := range fis {
+				if fi.Name() == filename {
+					p := filepath.Join(dir, filename)
+					info("using caches OS package %s", p)
+					aBytes, err = ioutil.ReadFile(p)
+					if err != nil {
+						reboot("read cache: %v", err)
+					}
+					break
+				}
+			}
+			if aBytes == nil {
+				debug("%s is not cached", filename)
+			}
+		}
+		if aBytes == nil {
+			debug("downloading %s", pkgURL.String())
+			aBytes, err = download(pkgURL)
+			if err != nil {
+				debug("Skip %s: %v", url.String(), err)
+				continue
+			}
+			debug("content type: %s", http.DetectContentType(aBytes))
+		}
+
+		// create sample
 		ar := uio.NewLazyOpener(func() (io.Reader, error) {
 			return bytes.NewReader(aBytes), nil
 		})
 		dr := uio.NewLazyOpener(func() (io.Reader, error) {
 			return bytes.NewReader(dBytes), nil
 		})
-
-		if pkgURL.Path != "" && url.Path[len(pkgURL.Path)-1] != '/' {
-			sample.name = path.Base(pkgURL.Path)
-		} else {
-			sample.name = "unnamed network OS package"
-		}
+		sample.name = filename
 		sample.archive = ar
 		sample.descriptor = dr
 		return sample, nil

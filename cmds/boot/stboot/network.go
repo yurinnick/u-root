@@ -30,12 +30,12 @@ const (
 	interfaceUpTimeout = 6 * time.Second
 )
 
-func configureStaticNetwork() error {
-	addr, err := hostConfig.ParseHostIP()
+func configureStaticNetwork(hc *HostConfig) error {
+	addr, err := hc.ParseHostIP()
 	if err != nil {
 		return fmt.Errorf("parsing host IP: %v", err)
 	}
-	gateway, err := hostConfig.ParseDefaultGateway()
+	gateway, err := hc.ParseDefaultGateway()
 	if err != nil {
 		return fmt.Errorf("parsing default gateway: %v", err)
 	}
@@ -182,18 +182,10 @@ func (rc *ProgressReadCloser) Close() error {
 	return rc.RC.Close()
 }
 
-func download(url *url.URL) ([]byte, error) {
-	if len(httpsRoots) == 0 {
-		return nil, fmt.Errorf("no https root certifiates loaded")
-	}
-
+func download(url *url.URL, httpsRoots *x509.CertPool) ([]byte, error) {
 	// setup client with values taken from http.DefaultTransport + RootCAs
-	roots := x509.NewCertPool()
-	for _, cert := range httpsRoots {
-		roots.AddCert(cert)
-	}
 	tls := &tls.Config{
-		RootCAs: roots,
+		RootCAs: httpsRoots,
 	}
 	client := http.Client{
 		Transport: (&http.Transport{

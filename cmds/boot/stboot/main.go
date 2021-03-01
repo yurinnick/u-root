@@ -16,9 +16,11 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/stboot"
@@ -34,14 +36,7 @@ var (
 	dryRun  = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
 )
 
-// Globals
-var (
-	debug          = func(string, ...interface{}) {}
-	securityConfig SecurityConfig
-	hostConfig     HostConfig
-	httpsRoots     []*x509.Certificate
-	txtHostSuport  bool
-)
+var debug = func(string, ...interface{}) {}
 
 // Files at initramfs
 const (
@@ -106,207 +101,74 @@ func main() {
 
 	info(banner)
 
-	/////////////////////////
-	// Early validation
-	/////////////////////////
+	/////////////////////
+	// Validation & Setup
+	/////////////////////
 
 	// Security Configuration
-	s, err := ioutil.ReadFile(securityConfigFile)
+	securityConfig, err := loadSecurityConfig(securityConfigFile)
 	if err != nil {
-		reboot("missing security config: %v", err)
-	}
-	if err = json.Unmarshal(s, &securityConfig); err != nil {
-		reboot("cannot parse security config: %v", err)
-	}
-	if *doDebug {
-		str, _ := json.MarshalIndent(securityConfig, "", "  ")
-		info("Security configuration: %s", str)
-	}
-	if err = securityConfig.Validate(); err != nil {
-		reboot("invalid security config: %v", err)
+		reboot("load security config: %v", err)
 	}
 
 	// Signing root certificate
-	pemBytes, err := ioutil.ReadFile(signingRootFile)
+	signingRoot, err := loadSigningRoot(signingRootFile)
 	if err != nil {
-		reboot("loading signing root cert failed: %v", err)
-	}
-	debug("signing root certificate:\n%s", string(pemBytes))
-	pemBlock, rest := pem.Decode(pemBytes)
-	if pemBlock == nil {
-		reboot("decoding signing root cert failed: %v", err)
-	}
-	if len(rest) > 0 {
-		reboot("signing root cert: unexpeceted trailing data")
-	}
-
-	signingRoot, err := x509.ParseCertificate(pemBlock.Bytes)
-	if err != nil {
-		reboot("parsing signing root cert failed: %v", err)
+		reboot("load signing root: %v", err)
 	}
 
 	// HTTPS root certificates
+	var httpsRoots []*x509.Certificate
 	if securityConfig.BootMode == Network {
-		pemBytes, err = ioutil.ReadFile(httpsRootsFile)
+		httpsRoots, err = loadHTTPSRoots(httpsRootsFile)
 		if err != nil {
-			reboot("loading https root certs failed: %v", err)
-		}
-		for len(pemBytes) > 0 {
-			var block *pem.Block
-			var n = 1
-			block, pemBytes = pem.Decode(pemBytes)
-			if block == nil {
-				break
-			}
-			if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-				continue
-			}
-			certBytes := block.Bytes
-			c, err := x509.ParseCertificate(certBytes)
-			if err != nil {
-				continue
-			}
-			if *doDebug {
-				info("HTTPS root certificate %d: ", n)
-				info("  Version: %d", c.Version)
-				info("  SerialNumber: %s", c.Issuer.SerialNumber)
-				info("  Issuer:")
-				info("    Organization: %s, %s", c.Issuer.Organization, c.Issuer.Country)
-				info("    Common Name: %s", c.Issuer.CommonName)
-				info("  Subject:")
-				info("    Organization: %s, %s", c.Subject.Organization, c.Subject.Country)
-				info("    Common Name: %s", c.Subject.CommonName)
-				info("  Valid from: %s", c.NotBefore.String())
-				info("  Valid until: %s", c.NotAfter.String())
-			}
-			httpsRoots = append(httpsRoots, c)
-			n++
-		}
-		if len(httpsRoots) == 0 {
-			reboot("no https root certifiates in %s", httpsRootsFile)
+			reboot("load HTTPS roots: %v", err)
 		}
 	}
 
-	// Mount STBOOT partition
-	err = mountBootPartition()
-	if err != nil {
-		reboot("STBOOT partition: %v", err)
+	// STBOOT and STDATA partitions
+	if err = mountBootPartition(); err != nil {
+		reboot("mount STBOOT partition: %v", err)
+	}
+	if err = mountDataPartition(); err != nil {
+		reboot("mount STDATA partition: %v", err)
+	}
+	if err = validatePartitions(securityConfig.BootMode); err != nil {
+		reboot("invalid partition: %v", err)
 	}
 
 	// Host configuration
 	p := filepath.Join(bootPartitionMountPoint, hostConfigurationFile)
-	bytes, err := ioutil.ReadFile(p)
+	hostConfig, err := loadHostConfig(p, securityConfig.BootMode == Network)
 	if err != nil {
-		reboot("missing host config: %v", err)
-	}
-	err = json.Unmarshal(bytes, &hostConfig)
-	if err != nil {
-		reboot("cannot parse host config: %v", err)
-	}
-	if *doDebug {
-		str, _ := json.MarshalIndent(hostConfig, "", "  ")
-		info("Host configuration: %s", str)
-	}
-	if err = hostConfig.Validate(securityConfig.BootMode == Network); err != nil {
-		reboot("invalid host config: %v", err)
+		reboot("load host config: %v", err)
 	}
 
-	// Mount STDATA partition
-	err = mountDataPartition()
-	if err != nil {
-		reboot("STDATA partition: %v", err)
+	// Boot order
+	var bootorder []string
+	if securityConfig.BootMode == Local {
+		p = filepath.Join(dataPartitionMountPoint, localBootOrderFile)
+		bootorder, err = loadBootOrder(p)
+		if err != nil {
+			reboot("load boot order: %v", err)
+		}
 	}
 
 	// System time
 	p = filepath.Join(dataPartitionMountPoint, timeFixFile)
-	timeFixRaw, err := ioutil.ReadFile(p)
+	buildTime, err := loadSystemTimeFix(p)
 	if err != nil {
-		reboot("time validation: %v", err)
+		reboot("load system time fix: %v", err)
 	}
-	buildTime, err := parseUNIXTimestamp(string(timeFixRaw))
-	if err != nil {
-		reboot("time validation: %v", err)
-	}
-	err = checkSystemTime(buildTime)
-	if err != nil {
+	if err = checkSystemTime(buildTime); err != nil {
 		reboot("%v", err)
 	}
 
-	// boot order
-	var bootorder []string
-	if securityConfig.BootMode == Local {
-		p = filepath.Join(dataPartitionMountPoint, localBootOrderFile)
-		f, err := os.Open(p)
-		if err != nil {
-			reboot("STDATA partition: missing file %s", localBootOrderFile)
-		}
-
-		names := make([]string, 0)
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			names = append(names, scanner.Text())
-		}
-		if err := scanner.Err(); err != nil {
-			reboot("scanning boot order file: %v", err)
-		}
-		f.Close()
-		if len(names) == 0 {
-			reboot("no boot order entries found")
-		}
-
-		for _, name := range names {
-			ext := filepath.Ext(name)
-			if ext == stboot.OSPackageExt || ext == stboot.DescriptorExt {
-				name = strings.TrimSuffix(name, ext)
-			}
-			p := filepath.Join(dataPartitionMountPoint, localOSPkgDir, name+stboot.OSPackageExt)
-			_, err := os.Stat(p)
-			if err != nil {
-				debug("skip %s: %v", name, err)
-				continue
-			}
-			p = filepath.Join(dataPartitionMountPoint, localOSPkgDir, name+stboot.DescriptorExt)
-			_, err = os.Stat(p)
-			if err != nil {
-				debug("skip %s: %v", name, err)
-				continue
-			}
-			bootorder = append(bootorder, name)
-		}
-		if len(bootorder) == 0 {
-			reboot("no valid boot order entries found")
-		}
-	}
-
-	// directories at STDATA partition
-	etcDir := filepath.Dir(currentOSPkgFile)
-	p = filepath.Join(dataPartitionMountPoint, etcDir)
-	stat, err := os.Stat(p)
-	if err != nil || !stat.IsDir() {
-		reboot("STDATA partition: missing directory %s", etcDir)
-	}
-
-	if securityConfig.BootMode == Local {
-		p = filepath.Join(dataPartitionMountPoint, localOSPkgDir)
-		stat, err := os.Stat(p)
-		if err != nil || !stat.IsDir() {
-			reboot("STDATA partition: missing directory %s", localOSPkgDir)
-		}
-	}
-
-	if securityConfig.BootMode == Network {
-		p = filepath.Join(dataPartitionMountPoint, networkOSpkgCache)
-		stat, err := os.Stat(p)
-		if err != nil || !stat.IsDir() {
-			reboot("STDATA partition: missing directory %s", networkOSpkgCache)
-		}
-	}
-
-	// network interface
+	// Network interface
 	if securityConfig.BootMode == Network {
 		switch hostConfig.NetworkMode {
 		case Static:
-			if err := configureStaticNetwork(); err != nil {
+			if err := configureStaticNetwork(hostConfig); err != nil {
 				reboot("cannot set up IO: %v", err)
 			}
 		case DHCP:
@@ -324,9 +186,9 @@ func main() {
 		}
 	}
 
-	// TXT host support
+	// TXT
 	info("TXT self tests are not implementet yet.")
-	txtHostSuport = false
+	txtHostSuport := false
 
 	// Init RNG
 	rngDev := "/dev/urandom"
@@ -342,12 +204,16 @@ func main() {
 	//////////////////
 	// Load OS package
 	//////////////////
-	var ospkgSampls []ospkgSampl
+	var ospkgSampls []*ospkgSampl
 
 	switch securityConfig.BootMode {
 	case Network:
 		info("Loading OS package via network")
-		s, err := networkLoad()
+		provUrls, err := hostConfig.ParseProvisioningURLs()
+		if err != nil {
+			reboot("parse provisioning URLs: %v", err)
+		}
+		s, err := networkLoad(provUrls, securityConfig.UsePkgCache, httpsRoots)
 		if err != nil {
 			reboot("load OS package via network: %v", err)
 		}
@@ -543,12 +409,8 @@ func markCurrentOSpkg(pkgPath string) {
 	}
 }
 
-func networkLoad() (ospkgSampl, error) {
+func networkLoad(urls []*url.URL, useCache bool, httpsRoots []*x509.Certificate) (*ospkgSampl, error) {
 	var sample ospkgSampl
-	urls, err := hostConfig.ParseProvisioningURLs()
-	if err != nil {
-		return sample, fmt.Errorf("pars URLs: %v", err)
-	}
 	if *doDebug {
 		info("Provisioning URLs:")
 		for _, u := range urls {
@@ -556,9 +418,17 @@ func networkLoad() (ospkgSampl, error) {
 		}
 	}
 
+	if len(httpsRoots) == 0 {
+		return nil, fmt.Errorf("httpsRoots must not be empty")
+	}
+	roots := x509.NewCertPool()
+	for _, cert := range httpsRoots {
+		roots.AddCert(cert)
+	}
+
 	for _, url := range urls {
 		debug("downloading %s", url.String())
-		dBytes, err := download(url)
+		dBytes, err := download(url, roots)
 		if err != nil {
 			debug("Skip %s: %v", url.String(), err)
 			continue
@@ -604,7 +474,7 @@ func networkLoad() (ospkgSampl, error) {
 		}
 
 		var aBytes []byte
-		if securityConfig.UsePkgCache {
+		if useCache {
 			debug("look up pkg cache")
 			dir := filepath.Join(dataPartitionMountPoint, networkOSpkgCache)
 			fis, err := ioutil.ReadDir(dir)
@@ -628,7 +498,7 @@ func networkLoad() (ospkgSampl, error) {
 		}
 		if aBytes == nil {
 			debug("downloading %s", pkgURL.String())
-			aBytes, err = download(pkgURL)
+			aBytes, err = download(pkgURL, roots)
 			if err != nil {
 				debug("Skip %s: %v", url.String(), err)
 				continue
@@ -646,25 +516,25 @@ func networkLoad() (ospkgSampl, error) {
 		sample.name = filename
 		sample.archive = ar
 		sample.descriptor = dr
-		return sample, nil
+		return &sample, nil
 	}
-	return sample, fmt.Errorf("all provisioning URLs failed")
+	return nil, fmt.Errorf("all provisioning URLs failed")
 }
 
-func diskLoad(names []string) ([]ospkgSampl, error) {
-	var samples = make([]ospkgSampl, 0)
+func diskLoad(names []string) ([]*ospkgSampl, error) {
+	var samples []*ospkgSampl
 	dir := filepath.Join(dataPartitionMountPoint, localOSPkgDir)
 	if len(names) == 0 {
-		return samples, fmt.Errorf("names must not be empty")
+		return nil, fmt.Errorf("names must not be empty")
 	}
 	for _, name := range names {
 		ap := filepath.Join(dir, name+stboot.OSPackageExt)
 		dp := filepath.Join(dir, name+stboot.DescriptorExt)
 		if _, err := os.Stat(ap); err != nil {
-			return samples, err
+			return nil, err
 		}
 		if _, err := os.Stat(dp); err != nil {
-			return samples, err
+			return nil, err
 		}
 		ar := uio.NewLazyOpener(func() (io.Reader, error) {
 			return os.Open(ap)
@@ -672,7 +542,7 @@ func diskLoad(names []string) ([]ospkgSampl, error) {
 		dr := uio.NewLazyOpener(func() (io.Reader, error) {
 			return os.Open(dp)
 		})
-		s := ospkgSampl{
+		s := &ospkgSampl{
 			name:       name,
 			archive:    ar,
 			descriptor: dr,
@@ -680,6 +550,211 @@ func diskLoad(names []string) ([]ospkgSampl, error) {
 		samples = append(samples, s)
 	}
 	return samples, nil
+}
+
+func validatePartitions(mode bootmode) error {
+	//STBOOT host config file
+	p := filepath.Join(bootPartitionMountPoint, hostConfigurationFile)
+	stat, err := os.Stat(p)
+	if err != nil {
+		return fmt.Errorf("STBOOT: missing file %s", hostConfigurationFile)
+	}
+	// STDATA /etc dir
+	etcDir := filepath.Dir(currentOSPkgFile)
+	p = filepath.Join(dataPartitionMountPoint, etcDir)
+	stat, err = os.Stat(p)
+	if err != nil || !stat.IsDir() {
+		return fmt.Errorf("STDATA: missing directory %s", etcDir)
+	}
+	//STDATA timefix file
+	p = filepath.Join(dataPartitionMountPoint, timeFixFile)
+	stat, err = os.Stat(p)
+	if err != nil {
+		return fmt.Errorf("STDATA: missing file %s", timeFixFile)
+	}
+	if mode == Local {
+		// STDATA local packages dir
+		p = filepath.Join(dataPartitionMountPoint, localOSPkgDir)
+		stat, err := os.Stat(p)
+		if err != nil || !stat.IsDir() {
+			return fmt.Errorf("STDATA: missing directory %s", localOSPkgDir)
+		}
+		//STDATA local boot order file
+		p = filepath.Join(dataPartitionMountPoint, localBootOrderFile)
+		stat, err = os.Stat(p)
+		if err != nil {
+			return fmt.Errorf("STDATA: missing file %s", localBootOrderFile)
+		}
+	}
+	if mode == Network {
+		// STDATA network cache dir
+		p = filepath.Join(dataPartitionMountPoint, networkOSpkgCache)
+		stat, err := os.Stat(p)
+		if err != nil || !stat.IsDir() {
+			return fmt.Errorf("STDATA: missing directory %s", networkOSpkgCache)
+		}
+	}
+	return nil
+}
+
+func loadSecurityConfig(path string) (*SecurityConfig, error) {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %v", err)
+	}
+	var sc SecurityConfig
+	if err = json.Unmarshal(b, &sc); err != nil {
+		return nil, fmt.Errorf("parsing JSON failed: %v", err)
+	}
+	if *doDebug {
+		str, _ := json.MarshalIndent(sc, "", "  ")
+		info("Security configuration: %s", str)
+	}
+	if err = sc.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid: %v", err)
+	}
+	return &sc, nil
+}
+
+func loadSigningRoot(path string) (*x509.Certificate, error) {
+	pemBytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %v", err)
+	}
+	debug("signing root certificate:\n%s", string(pemBytes))
+	pemBlock, rest := pem.Decode(pemBytes)
+	if pemBlock == nil {
+		return nil, fmt.Errorf("decoding PEM failed")
+	}
+	if len(rest) > 0 {
+		return nil, fmt.Errorf("unexpeceted trailing data")
+	}
+	cert, err := x509.ParseCertificate(pemBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing x509 failed: %v", err)
+	}
+	return cert, nil
+}
+
+func loadHTTPSRoots(path string) ([]*x509.Certificate, error) {
+	pemBytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %v", err)
+	}
+	var roots []*x509.Certificate
+	for len(pemBytes) > 0 {
+		var block *pem.Block
+		var n = 1
+		block, pemBytes = pem.Decode(pemBytes)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+			continue
+		}
+		certBytes := block.Bytes
+		cert, err := x509.ParseCertificate(certBytes)
+		if err != nil {
+			continue
+		}
+		if *doDebug {
+			info("HTTPS root certificate %d: ", n)
+			info("  Version: %d", cert.Version)
+			info("  SerialNumber: %s", cert.Issuer.SerialNumber)
+			info("  Issuer:")
+			info("    Organization: %s, %s", cert.Issuer.Organization, cert.Issuer.Country)
+			info("    Common Name: %s", cert.Issuer.CommonName)
+			info("  Subject:")
+			info("    Organization: %s, %s", cert.Subject.Organization, cert.Subject.Country)
+			info("    Common Name: %s", cert.Subject.CommonName)
+			info("  Valid from: %s", cert.NotBefore.String())
+			info("  Valid until: %s", cert.NotAfter.String())
+		}
+		roots = append(roots, cert)
+		n++
+	}
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("no certifiates found")
+	}
+	return roots, nil
+}
+
+func loadHostConfig(path string, validateNetwork bool) (*HostConfig, error) {
+	bytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %v", err)
+	}
+	var hc *HostConfig
+	err = json.Unmarshal(bytes, &hc)
+	if err != nil {
+		return nil, fmt.Errorf("parsing JSON failed: %v", err)
+	}
+	if *doDebug {
+		str, _ := json.MarshalIndent(hc, "", "  ")
+		info("Host configuration: %s", str)
+	}
+	if err = hc.Validate(validateNetwork); err != nil {
+		return nil, fmt.Errorf("invalid: %v", err)
+	}
+	return hc, nil
+}
+
+func loadBootOrder(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open: %v", err)
+	}
+
+	var names []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		names = append(names, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scann file: %v", err)
+	}
+	f.Close()
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no entries found")
+	}
+
+	var bootorder []string
+	for _, name := range names {
+		ext := filepath.Ext(name)
+		if ext == stboot.OSPackageExt || ext == stboot.DescriptorExt {
+			name = strings.TrimSuffix(name, ext)
+		}
+		p := filepath.Join(dataPartitionMountPoint, localOSPkgDir, name+stboot.OSPackageExt)
+		_, err := os.Stat(p)
+		if err != nil {
+			debug("skip %s: %v", name, err)
+			continue
+		}
+		p = filepath.Join(dataPartitionMountPoint, localOSPkgDir, name+stboot.DescriptorExt)
+		_, err = os.Stat(p)
+		if err != nil {
+			debug("skip %s: %v", name, err)
+			continue
+		}
+		bootorder = append(bootorder, name)
+	}
+	if len(bootorder) == 0 {
+		return nil, fmt.Errorf("no valid entries found")
+	}
+	return bootorder, nil
+}
+
+func loadSystemTimeFix(path string) (time.Time, error) {
+	var t time.Time
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		return t, fmt.Errorf("read file: %v", err)
+	}
+	t, err = parseUNIXTimestamp(string(raw))
+	if err != nil {
+		return t, fmt.Errorf("parse UNIX timestamp: %v", err)
+	}
+	return t, nil
 }
 
 //reboot trys to reboot the system in an infinity loop

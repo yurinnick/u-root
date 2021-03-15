@@ -633,6 +633,10 @@ func loadSigningRoot(path string) (*x509.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing x509 failed: %v", err)
 	}
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return nil, fmt.Errorf("certificate has expired or is not yet valid")
+	}
 	return cert, nil
 }
 

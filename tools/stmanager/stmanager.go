@@ -26,12 +26,13 @@ const (
 	// HelpText is the command line help
 	HelpText = "stmanager can be used for managing System Transparency OS packages"
 
-	DefaultOutName      = "system-transparency-os-package"
-	DefaultCertName     = "cert.pem"
-	DefaultRootCertName = "rootcert.pem"
-	DefaultKeyName      = "key.pem"
-	DefaultRootKeyName  = "rootkey.pem"
-	DateFormat          = "02 Jan 06 15:04 UTC" //time.RFC822
+	DefaultOutName        = "system-transparency-os-package"
+	DefaultCertName       = "cert.pem"
+	DefaultRootCertName   = "rootcert.pem"
+	DefaultKeyName        = "key.pem"
+	DefaultRootKeyName    = "rootkey.pem"
+	DateFormat            = "02 Jan 06 15:04 UTC" //time.RFC822
+	DefaultValidityPeriod = 72 * time.Hour
 )
 
 var goversion string
@@ -61,7 +62,7 @@ var (
 	keygenRootKey    = kingpin.Flag("rootKey", "Root key in PEM format to sign the new certificate. Ignored if --isCA is set").ExistingFile()
 	keygenIsCA       = kingpin.Flag("isCA", "Generate a self signed root certificate.").Bool()
 	keygenValidFrom  = kingpin.Flag("validFrom", "Date formatted as '"+DateFormat+"'. Defaults to time of creation").String()
-	keygenValidUntil = kingpin.Flag("validUntil", "Date formatted as '"+DateFormat+"'. Defaults to time of creation").String()
+	keygenValidUntil = kingpin.Flag("validUntil", "Date formatted as '"+DateFormat+"'. Defaults to time of creation + "+DefaultValidityPeriod.String()).String()
 	keygenCertOut    = kingpin.Flag("certOut", "Output certificate file. Defaults to "+DefaultCertName+" or "+DefaultRootCertName+" if --isCA is set.").String()
 	keygenKeyOut     = kingpin.Flag("keyOut", "Output key file. Defaults to "+DefaultKeyName+" or "+DefaultRootKeyName+" if --isCA is set.").String()
 )
@@ -114,11 +115,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		notBefore, err := parseTime(*keygenValidFrom)
+		notBefore, err := parseValidFrom(*keygenValidFrom)
 		if err != nil {
 			log.Fatalf("failed to parse 'validFrom' date: %v, try --help", err)
 		}
-		notAfter, err := parseTime(*keygenValidUntil)
+		notAfter, err := parseValidUntil(*keygenValidUntil)
 		if err != nil {
 			log.Fatalf("failed to parse 'validUntil' date: %v, try --help", err)
 		}
@@ -242,9 +243,16 @@ func parseACMPaths(acm string) ([]string, error) {
 	return acms, nil
 }
 
-func parseTime(date string) (time.Time, error) {
+func parseValidFrom(date string) (time.Time, error) {
 	if len(date) == 0 {
 		return time.Now(), nil
+	}
+	return time.Parse(DateFormat, date)
+}
+
+func parseValidUntil(date string) (time.Time, error) {
+	if len(date) == 0 {
+		return time.Now().Add(DefaultValidityPeriod), nil
 	}
 	return time.Parse(DateFormat, date)
 }

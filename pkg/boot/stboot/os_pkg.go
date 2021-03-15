@@ -16,7 +16,6 @@ import (
 	"log"
 	"net/url"
 	"path/filepath"
-	"time"
 
 	"github.com/u-root/u-root/pkg/boot"
 	"github.com/u-root/u-root/pkg/boot/multiboot"
@@ -357,7 +356,6 @@ func (ospkg *OSPackage) Sign(keyBlock, certBlock *pem.Block) error {
 func (ospkg *OSPackage) Verify(rootCert *x509.Certificate) (found, valid int, err error) {
 	found = 0
 	valid = 0
-	hackValidityBounds(rootCert)
 
 	var certsUsed []*x509.Certificate
 	for i, sig := range ospkg.descriptor.Signatures {
@@ -375,7 +373,6 @@ func (ospkg *OSPackage) Verify(rootCert *x509.Certificate) (found, valid int, er
 		opts := x509.VerifyOptions{
 			Roots: roots,
 		}
-		hackValidityBounds(cert)
 		_, err = cert.Verify(opts)
 		if err != nil {
 			log.Printf("skip signature %d: invalid certificate: %v", i+1, err)
@@ -470,9 +467,4 @@ func calculateHash(data []byte) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("empty input")
 	}
 	return sha256.Sum256(data), nil
-}
-
-func hackValidityBounds(cert *x509.Certificate) {
-	cert.NotBefore = time.Now().Add(-24 * time.Hour)
-	cert.NotAfter = time.Now().Add(24 * time.Hour)
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/u-root/u-root/pkg/dhclient"
+	"github.com/u-root/u-root/pkg/uio"
 	"github.com/vishvananda/netlink"
 )
 
@@ -154,34 +155,6 @@ func findNetworkInterfaces() ([]netlink.Link, error) {
 	return links, nil
 }
 
-type ProgressReadCloser struct {
-	RC io.ReadCloser
-
-	Symbol   string
-	Interval int
-	W        io.Writer
-
-	counter int
-	written bool
-}
-
-func (rc *ProgressReadCloser) Read(p []byte) (n int, err error) {
-	defer func() {
-		numSymbols := (rc.counter%rc.Interval + n) / rc.Interval
-		rc.W.Write([]byte(strings.Repeat(rc.Symbol, numSymbols)))
-		rc.counter += n
-		rc.written = (rc.written || numSymbols > 0)
-		if err == io.EOF && rc.written {
-			rc.W.Write([]byte("\n"))
-		}
-	}()
-	return rc.RC.Read(p)
-}
-
-func (rc *ProgressReadCloser) Close() error {
-	return rc.RC.Close()
-}
-
 func download(url *url.URL, httpsRoots *x509.CertPool) ([]byte, error) {
 	// setup client with values taken from http.DefaultTransport + RootCAs
 	tls := &tls.Config{
@@ -217,7 +190,7 @@ func download(url *url.URL, httpsRoots *x509.CertPool) ([]byte, error) {
 	}
 	if *doDebug {
 		progress := func(rc io.ReadCloser) io.ReadCloser {
-			return &ProgressReadCloser{
+			return &uio.ProgressReadCloser{
 				RC:       rc,
 				Symbol:   ".",
 				Interval: 5 * 1024 * 1024,

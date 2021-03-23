@@ -498,6 +498,32 @@ func (b BlockDevices) FilterPartType(guid string) BlockDevices {
 	return b.FilterNames(names...)
 }
 
+// FilterPartLabel returns a list of BlockDev objects whose underlying block
+// device has the given parition label.
+func (b BlockDevices) FilterPartLabel(label string) BlockDevices {
+	var names []string
+	for _, device := range b {
+		table, err := device.GPTTable()
+		if err != nil {
+			continue
+		}
+		for i, part := range table.Partitions {
+			if part.IsEmpty() {
+				continue
+			}
+			if strings.ToLower(part.Name()) == strings.ToLower(label) {
+				r := []rune(device.Name[len(device.Name)-1:])
+				if unicode.IsDigit(r[0]) {
+					names = append(names, fmt.Sprintf("%sp%d", device.Name, i+1))
+				} else {
+					names = append(names, fmt.Sprintf("%s%d", device.Name, i+1))
+				}
+			}
+		}
+	}
+	return b.FilterNames(names...)
+}
+
 // FilterNames filters block devices by the given list of device names (e.g.
 // /dev/sda1 sda2 /sys/class/block/sda3).
 func (b BlockDevices) FilterNames(names ...string) BlockDevices {
@@ -545,13 +571,6 @@ func (b BlockDevices) filterUsingSymlink(symlink string) (BlockDevices, error) {
 		}
 	}
 	return newBlockDevices, nil
-}
-
-// FilterPartLabel returns a list of BlockDev objects whose underlying block
-// device has the given parition label.
-// TODO: This is only useful if udev has created /dev/disk/by-partlabel/...
-func (b BlockDevices) FilterPartLabel(label string) (BlockDevices, error) {
-	return b.filterUsingSymlink(filepath.Join("/dev/disk/by-partlabel", label))
 }
 
 // FilterName returns a list of BlockDev objects whose underlying

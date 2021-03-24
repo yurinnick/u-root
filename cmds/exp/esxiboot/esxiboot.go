@@ -15,6 +15,8 @@
 //     --device=FILE or -d=FILE: set an ESXi disk to boot from
 //     --cdrom=FILE or -r=FILE: set an ESXI CDROM to boot from
 //     --append: append kernel cmdline arguments
+//     --dry-run: mount and load kernel without kexec
+//     --debug: add debug output
 //
 // --device is required to kexec installed ESXi instance.
 // You don't need it if you kexec ESXi installer.
@@ -46,6 +48,7 @@ var (
 	diskDev       = flag.StringP("device", "d", "", "ESXi disk boot device")
 	appendCmdline = flag.StringArray("append", nil, "Arguments to append to kernel cmdline")
 	dryRun        = flag.Bool("dry-run", false, "dry run (just mount + load the kernel, don't kexec)")
+	debug		  = flag.Bool("debug", false, "Enable debug output")
 )
 
 func main() {
@@ -67,7 +70,7 @@ func main() {
 			if len(*appendCmdline) > 0 {
 				img.Cmdline = img.Cmdline + " " + strings.Join(*appendCmdline, " ")
 			}
-			if err := img.Load(false); err != nil {
+			if err := img.Load(debug); err != nil {
 				log.Printf("Failed to load ESXi image (%v) into memory: %v", img, err)
 			} else {
 				log.Printf("Loaded image: %v", img)
@@ -99,7 +102,7 @@ func main() {
 		if len(*appendCmdline) > 0 {
 			img.Cmdline = img.Cmdline + " " + strings.Join(*appendCmdline, " ")
 		}
-		if err := img.Load(false); err != nil {
+		if err := img.Load(debug); err != nil {
 			log.Fatalf("Failed to load ESXi image (%v) into memory: %v", img, err)
 		}
 		log.Printf("Loaded image: %v", img)
